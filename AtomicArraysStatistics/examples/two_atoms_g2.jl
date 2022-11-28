@@ -183,6 +183,8 @@ PyPlot.ylabel(L"\mathrm{Spectrum}")
 PyPlot.xlim(-3,3)
 PyPlot.legend()
 
+display(gcf())
+
 # g2 function
 
 tau_0 = [0:0.05:100;]
@@ -201,13 +203,14 @@ g2 = G2 / (n_ss * n_ss)
 D = AtomicArraysStatistics.jump_op_direct_detection(π/2, 0*π/4, 0.02^2*pi^2, S, 2π, J)
 g2 = AtomicArraysStatistics.coherence_function_g2(tau_0, H, J, D; rates=Γ, rho0=ρ_ss)
 
-fig_00 = PyPlot.figure(figsize=(6, 8))
+fig_00 = PyPlot.figure(figsize=(6, 4))
 PyPlot.subplot(111)
 PyPlot.plot(tau_0, real(g2), label="atom 1")
 PyPlot.xlabel(L"\tau")
 PyPlot.ylabel(L"g^{(2)}(\tau)")
 PyPlot.legend()
 
+display(gcf())
 
 "g2 depending on angle"
 
@@ -223,13 +226,15 @@ Threads.@threads for ii in 1:NMAX
     g2_result[ii] = real(g2[1])
 end
 
-fig, ax = plt.subplots(1, 1, subplot_kw=Dict("projection" => "polar"), figsize=(5,5))
+fig_01, ax = plt.subplots(1, 1, subplot_kw=Dict("projection" => "polar"), figsize=(5,5))
 ax.plot(phi_var, g2_result)
 # ax.set_rmax(2)
 # ax.set_rticks([0.5, 1, 1.5, 2])  # Less radial ticks
 ax.set_rlabel_position(-22.5)  # Move radial labels away from plotted line
 ax.grid(true)
 ax.set_title(L"g^{(2)}(0)", va="bottom")
+
+display(fig_01)
 
 "g2 depending on both angles"
 
@@ -245,6 +250,27 @@ Threads.@threads for iijj in CartesianIndices((NMAX ÷ 2, NMAX))
     print(ii)
 end
 
+lθ = length(theta_var);
+lϕ = length(phi_var);
+
+x = zeros(lθ,lϕ);
+y = zeros(lθ,lϕ);
+z = zeros(lθ,lϕ);
+
+for ii=1:lθ
+	for jj=1:lϕ
+		x[ii,jj]= g2_result_2D[ii,jj]*cos(phi_var[jj])*sin(theta_var[ii]);
+		y[ii,jj]= g2_result_2D[ii,jj]*sin(phi_var[jj])*sin(theta_var[ii]);
+		z[ii,jj]= g2_result_2D[ii,jj]*cos(theta_var[ii]);
+	end
+end
+
+fig_02, ax = plt.subplots(1, 1, subplot_kw=Dict("projection" => "3d"), figsize=(5,5))
+surf(x,y,z);
+# ax.plot_trisurf(x, y, z)
+display(fig_02)
+
+display(gcf())
 # Plots
 
 fig = PyPlot.figure(figsize=(8, 12))
