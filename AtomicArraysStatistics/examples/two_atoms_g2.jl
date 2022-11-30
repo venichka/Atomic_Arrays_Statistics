@@ -15,28 +15,32 @@ end
 using LinearAlgebra
 using QuantumOptics
 using PyPlot
+using GLMakie
 using AtomicArrays
 using Revise
 
 using AtomicArraysStatistics
 
-
 const EMField = field.EMField
+# const em_inc_function = AtomicArrays.field.gauss
+const em_inc_function = AtomicArrays.field.plane
+const NMAX = 100
+const NMAX_T = 5
+const DIRECTION = "R"
 
+const PATH_FIGS, PATH_DATA = AtomicArraysStatistics.path()
 
 # System parameters
 const a = 0.18
 const γ = 1.
-const e_dipole = [0, 0, 1.]
+const e_dipole = [1., 0, 0]
 const T = [0:0.05:500;]
 const N = 2
 const Ncenter = 1
-const NMAX = 100
 
-const pos = geometry.chain_dir(a, N; dir="x", pos_0=[-a / 2, 0, 0])
+const pos = geometry.chain_dir(a, N; dir="z", pos_0=[0, 0, -a / 2])
 const Delt = [(i < N) ? 0.0 : 0.5 for i = 1:N]
 const S = SpinCollection(pos, e_dipole; gammas=γ, deltas=Delt)
-const em_inc_function = field.plane
 
 # Define Spin 1/2 operators
 spinbasis = SpinBasis(1//2)
@@ -50,9 +54,17 @@ I_spin = identityoperator(spinbasis)
 # Incident field
 E_ampl = 0.2 + 0im
 E_kvec = 2π
-E_pos0 = [0.0, 0.0, 0.0]
-E_polar = [1.0, 0im, 0.0]
-E_angle = [-π / 2, 0.0]
+if (DIRECTION == "R")
+    E_pos0 = [0.0,0.0,0.0]
+    E_polar = [1.0, 0im, 0.0]
+    E_angle = [0.0, 0.0]  # {θ, φ}
+elseif (DIRECTION == "L")
+    E_pos0 = [0.0,0.0,0.0*a]
+    E_polar = [-1.0, 0im, 0.0]
+    E_angle = [π, 0.0]  # {θ, φ}
+else
+    println("DIRECTION wasn't specified")
+end
 
 E_inc = EMField(E_ampl, E_kvec, E_angle, E_polar;
     position_0=E_pos0, waist_radius=0.1)
@@ -63,9 +75,9 @@ x = range(-3.0, 3.0, NMAX)
 y = 0.0
 z = range(-5.0, 5.0, NMAX)
 e_field = Matrix{ComplexF64}(undef, length(x), length(z))
-for i = 1:length(x)
-    for j = 1:length(z)
-        e_field[i, j] = em_inc_function([x[i], y, z[j]], E_inc)[3]
+for i in eachindex(x)
+    for j in eachindex(z)
+        e_field[i, j] = em_inc_function([x[i], y, z[j]], E_inc)[1]
     end
 end
 
@@ -200,7 +212,7 @@ G2 = AtomicArraysStatistics.correlation_3op_1t(tau_0, ρ_ss, H, J, A, B, C;
 
 g2 = G2 / (n_ss * n_ss)
 
-D = AtomicArraysStatistics.jump_op_direct_detection(π/2, 0*π/4, 0.02^2*pi^2, S, 2π, J)
+D = AtomicArraysStatistics.jump_op_direct_detection(π/2, π/4, 0.02^2*pi^2, S, 2π, J)
 g2 = AtomicArraysStatistics.coherence_function_g2(tau_0, H, J, D; rates=Γ, rho0=ρ_ss)
 
 fig_00 = PyPlot.figure(figsize=(6, 4))
@@ -217,24 +229,51 @@ display(gcf())
 phi_var = range(0, 2π, NMAX)
 theta_var = range(0, π, NMAX ÷ 2)
 
-g2_result = zeros(NMAX)
+g2_result = zeros(2, NMAX)
 
-Threads.@threads for ii in 1:NMAX
+# Steady-state for both directions
+ρ_ss_1 = ρ_ss
+ρ_ss_2 = ρ_ss
+for kk = 1:2
+    E_angle = (kk == 1) ? [0, 0.0] : [π, 0.0] 
+    E_inc = EMField(E_ampl, E_kvec, E_angle, E_polar;
+        position_0=E_pos0, waist_radius=0.1)
+    E_vec = [em_inc_function(S.spins[k].position, E_inc) for k = 1:N]
+    Om_R = field.rabi(E_vec, S.polarizations)
+    Γ, J = AtomicArrays.quantum.JumpOperators(S)
+    Jdagger = [dagger(j) for j = J]
+    Ω = AtomicArrays.interaction.OmegaMatrix(S)
+    H = AtomicArrays.quantum.Hamiltonian(S) - sum(Om_R[j] * J[j] +
+                                                  conj(Om_R[j]) * Jdagger[j]
+                                                  for j = 1:N)
+    if kk == 1
+        ρ_ss_1 = QuantumOptics.steadystate.eigenvector(H, J; rates=Γ)
+    elseif kk == 2
+        ρ_ss_2 = QuantumOptics.steadystate.eigenvector(H, J; rates=Γ)
+    end
+end
+
+
+Threads.@threads for kkii in CartesianIndices((2, NMAX))
+    (kk, ii) = Tuple(kkii)[1], Tuple(kkii)[2]
+    ρ_ss = (kk == 1) ? ρ_ss_1 : ρ_ss_2
     ϕ = phi_var[ii]
-    D = AtomicArraysStatistics.jump_op_direct_detection(π/2, ϕ, 0.02^2*pi^2, S, 2π, J)
+    # θ = theta_var[ii]
+    D = AtomicArraysStatistics.jump_op_direct_detection(ϕ, pi / 4, 0.02^2*pi^2, S, 2π, J)
     g2 = AtomicArraysStatistics.coherence_function_g2(tau_0, H, J, D; rates=Γ, rho0=ρ_ss)
-    g2_result[ii] = real(g2[1])
+    g2_result[kk, ii] = real(g2[1])
 end
 
 fig_01, ax = plt.subplots(1, 1, subplot_kw=Dict("projection" => "polar"), figsize=(5,5))
-ax.plot(phi_var, g2_result)
-# ax.set_rmax(2)
-# ax.set_rticks([0.5, 1, 1.5, 2])  # Less radial ticks
+ax.plot(phi_var, g2_result[1, :], label="f")
+ax.plot(phi_var, g2_result[2, :], label="b")
 ax.set_rlabel_position(-22.5)  # Move radial labels away from plotted line
 ax.grid(true)
 ax.set_title(L"g^{(2)}(0)", va="bottom")
-
+ax.legend()
 display(fig_01)
+
+# fig_01.savefig(PATH_FIGS * "g2_N" * string(N) * "_" * "phi_RL" * ".pdf", dpi=300)
 
 "g2 depending on both angles"
 
@@ -247,30 +286,43 @@ Threads.@threads for iijj in CartesianIndices((NMAX ÷ 2, NMAX))
     D = AtomicArraysStatistics.jump_op_direct_detection(θ, ϕ, 0.02^2*pi^2, S, 2π, J)
     g2 = AtomicArraysStatistics.coherence_function_g2(tau_0, H, J, D; rates=Γ, rho0=ρ_ss)
     g2_result_2D[ii, jj] = real(g2[1])
-    print(ii)
+    print(ii, "\n")
 end
 
 lθ = length(theta_var);
 lϕ = length(phi_var);
 
-x = zeros(lθ,lϕ);
-y = zeros(lθ,lϕ);
-z = zeros(lθ,lϕ);
+X = zeros(lθ,lϕ);
+Y = zeros(lθ,lϕ);
+Z = zeros(lθ,lϕ);
 
 for ii=1:lθ
 	for jj=1:lϕ
-		x[ii,jj]= g2_result_2D[ii,jj]*cos(phi_var[jj])*sin(theta_var[ii]);
-		y[ii,jj]= g2_result_2D[ii,jj]*sin(phi_var[jj])*sin(theta_var[ii]);
-		z[ii,jj]= g2_result_2D[ii,jj]*cos(theta_var[ii]);
+		X[ii,jj]= g2_result_2D[ii,jj]*cos(phi_var[jj])*sin(theta_var[ii]);
+		Y[ii,jj]= g2_result_2D[ii,jj]*sin(phi_var[jj])*sin(theta_var[ii]);
+		Z[ii,jj]= g2_result_2D[ii,jj]*cos(theta_var[ii]);
 	end
 end
+x_at = [pos[i][1] for i = 1:N]
+y_at = [pos[i][2] for i = 1:N]
+z_at = [pos[i][3] for i = 1:N]
 
-fig_02, ax = plt.subplots(1, 1, subplot_kw=Dict("projection" => "3d"), figsize=(5,5))
-surf(x,y,z);
-# ax.plot_trisurf(x, y, z)
-display(fig_02)
+GLMakie.activate!()
+fig, ax, pltobj = surface(X, Y, Z; shading = true, ambient = Vec3f(0.65, 0.65, 0.65),
+    backlight = 1.0f0, color = sqrt.(X .^ 2 .+ Y .^ 2 .+ Z .^ 2),
+    colormap = :viridis, transparency = true,
+    figure = (; resolution = (1200, 800), fontsize = 22),
+    axis=(type=Axis3, aspect = :data, azimuth = 2*pi/12, elevation = pi/30))
+meshscatter!(ax, x_at, y_at, z_at; color = "black",
+             markersize = 0.05)
+wireframe!(X, Y, Z; overdraw = true, transparency = true, color = (:black, 0.1))
+wireframe!(X, Y*0 .+ minimum(Y), Z; transparency = true, color = (:grey, 0.1))
+Colorbar(fig[1, 2], pltobj, height = Relative(0.5))
+colsize!(fig.layout, 1, Aspect(1, 1.0))
+fig
 
-display(gcf())
+save((PATH_FIGS * "g2_N" * string(N) * "_" * "theta_phi_" * DIRECTION * ".png"), fig) # here, you save your figure.
+
 # Plots
 
 fig = PyPlot.figure(figsize=(8, 12))

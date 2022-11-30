@@ -103,6 +103,27 @@ end
 
 
 """
+    AtomicArraysStatistics.D_angle(θ::Number, ϕ::Number, S::SpinCollection)
+Calculate the source-mode jump operators
+
+``D(\\theta, \\phi) = \\frac{3}{8 \\pi} \\left( 1 - (\\mu \\cdot \\hat{r}(\\theta, \\phi)^2) \\right)``.
+
+# Arguments
+* `θ`: angle between z axis and radius-vector
+* `ϕ`: angle in xy plane starting from x axis
+* `S`: spin collection
+
+# Return
+* `D_θϕ`: angular distribution
+"""
+function D_angle(θ::Number, ϕ::Number, S::SpinCollection)
+    μ = S.polarizations[1]
+    r_n = [sin.(θ)*cos.(ϕ), sin.(θ)*sin.(ϕ), cos(θ)]
+    return 3.0 / (8.0*pi) * (1 - (μ' * r_n)^2)
+end
+
+
+"""
     AtomicArraysStatistics.jump_op_direct_detection(r::Vector, dΩ::Number, S::SpinCollection, J)
 Calculate the direct-detection jump operators
 
@@ -127,8 +148,8 @@ function jump_op_direct_detection(r::Vector, dΩ::Number, S::SpinCollection, k_0
     μ = S.polarizations[1]
     γ = S.gammas[1]
     r_n = r ./ norm(r)
-    D_θϕ = 3.0 / (8.0*pi) * (1 - (μ * r_n')[1]^2)
-    S_op = sqrt.(γ * D_θϕ * dΩ) * sum([exp(-im*k_0*(r_n * S.spins[j].position')[1])*J[j]
+    D_θϕ = 3.0 / (8.0*pi) * (1 - (μ' * r_n)[1]^2)
+    S_op = sqrt.(γ * D_θϕ * dΩ) * sum([exp(-im*k_0*(r_n' * S.spins[j].position)[1])*J[j]
                                        for j = 1:N])
     return S_op
 end
@@ -139,10 +160,32 @@ function jump_op_direct_detection(θ::Real, ϕ::Real, dΩ::Number, S::SpinCollec
     μ = S.polarizations[1]
     γ = S.gammas[1]
     r_n = [sin.(θ)*cos.(ϕ), sin.(θ)*sin.(ϕ), cos(θ)]
-    D_θϕ = 3.0 / (8.0*pi) * (1 - (μ * r_n')[1]^2)
-    S_op = sqrt.(γ * D_θϕ * dΩ) * sum([exp(-im*k_0*(r_n * S.spins[j].position')[1])*J[j]
+    D_θϕ = 3.0 / (8.0*pi) * (1 - (μ' * r_n)[1]^2)
+    S_op = sqrt.(γ * D_θϕ * dΩ) * sum([exp(-im*k_0*(r_n' * S.spins[j].position)[1])*J[j]
                                        for j = 1:N])
     return S_op
+end
+
+"""
+    AtomicArraysStatistics.path()
+
+# Output: 
+* PATH_FIGS
+* PATH_DATA
+"""
+function path()
+    home = homedir()
+    if home == "C:\\Users\\nnefedkin"
+        PATH_FIGS = "D:/nnefedkin/Google_Drive/Work/In process/Projects/Collective_effects_QMS/Figures/two_arrays/forward_scattering/"
+        PATH_DATA = "D:/nnefedkin/Google_Drive/Work/In process/Projects/Collective_effects_QMS/Data/data_2arrays_mpc_mf/"
+    elseif home == "/home/nikita"
+        PATH_FIGS = "/home/nikita/Documents/Work/Projects/two_arrays/Figs/"
+        PATH_DATA = "/home/nikita/Documents/Work/Projects/two_arrays/Data/"
+    elseif home == "/Users/jimi"
+        PATH_FIGS = "/Users/jimi/Google Drive/Work/In process/Projects/Statistics_QMS/Figs/"
+        PATH_DATA = "/Users/jimi/Google Drive/Work/In process/Projects/Statistics_QMS/Data/"
+    end
+    return PATH_FIGS, PATH_DATA
 end
 
 end # module AtomicArraysStatistics
