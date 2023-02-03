@@ -30,6 +30,7 @@ const em_inc_function = AtomicArrays.field.plane
 const NMAX = 10
 const N_traj = 1000
 const NMAX_T = 5
+const N_BINS = 1000
 const DIRECTION = "L"
 
 const PATH_FIGS, PATH_DATA = AtomicArraysStatistics.path()
@@ -186,21 +187,20 @@ psi_ss_S = psi_t_S[end]
 
 D = [AtomicArraysStatistics.jump_op_direct_detection(phi_var[(i-1) % NMAX + 1], theta_var[(i-1) ÷ NMAX + 1], dΩ[(i-1) ÷ NMAX + 1, (i-1) % NMAX + 1], S, 2π, J) for i = 1:NMAX*(NMAX ÷ 2)]
 
-@btime test, psi_t, jump_t_S, jump_i_S = timeevolution.mcwf([0:5e4:5e6;], psi_ss_S, H, D; display_jumps=true, maxiters=1e15)
+tout_S, psi_t, jump_t_S, jump_i_S = timeevolution.mcwf([0:5e4:5e6;], psi_ss_S, H, D; display_jumps=true, maxiters=1e15)
 
 # Time evolution
 begin
+    # TODO: understand why the distributed computations fail for large N_traj
     T_wtau = [0:5e3:5e4;]
     _, _, jump_t_S, jump_i_S = timeevolution.mcwf(T_wtau, psi_ss_S, H, D; 
                                     display_jumps=true, maxiters=1e15)
-    w_tau_S = [jump_t_S[j+1] - jump_t_S[j] for j in 1:(length(jump_t_S) - 1)]
     progress = Progress(N_traj)
     Threads.@threads for i=1:N_traj
-        _, _, jump_t_S_0, jump_i_S_0 = timeevolution.mcwf(T_wtau, psi_ss_S, H, D; 
-                                        display_jumps=true, maxiters=1e15)
+        _, _, jump_t_S_0, jump_i_S_0 = timeevolution.mcwf(T_wtau, psi_ss_S, 
+                                H, D; display_jumps=true, maxiters=1e15)
         append!(jump_t_S, jump_t_S_0)
         append!(jump_i_S, jump_i_S_0)
-        w_tau_S = [jump_t_S[j+1] - jump_t_S[j] for j in 1:(length(jump_t_S) - 1)]
         next!(progress)
     end
 end
@@ -213,36 +213,42 @@ w_tau_S = [jump_t_S[j+1] - jump_t_S[j] for j in 1:(length(jump_t_S) - 1)]
 w_tau_S = w_tau_S[w_tau_S .>= 0]
 begin  # compute WTD by the angle
     w_tau_S_n = []
+    idx_no_stat = []
     for i = 1:NMAX*(NMAX ÷ 2)
         jumps = jump_t_S[jump_i_S .== i]
         jumps_dist = [jumps[j+1] - jumps[j] 
                     for j in 1:(length(jumps) - 1)]
         jumps_dist = jumps_dist[jumps_dist .>= 0]
+        if isempty(jumps_dist)
+            append!(idx_no_stat, i)
+            print(i, " ")
+        end
         push!(w_tau_S_n, jumps_dist)
     end
     print("w_tau_S_n computed.\n")
 end
+
 begin # angle distribution (note that N_BINS for StatsBase should be x2 
       # in comparison with Matplotlib)
-    # TODO: to accelerate computation
-    const N_BINS = 1000
-    w_angle_0 = zeros(NMAX ÷ 2, NMAX)
+    w_angle_0 = zeros(Float64, NMAX ÷ 2, NMAX)
     for i = 1:NMAX*(NMAX ÷ 2)
-        h_0 = StatsBase.fit(Histogram, w_tau_S_n[i] ./ mean(w_tau_S_n[i]), 
-                            nbins=N_BINS)
-        h_0_norm = normalize(h_0, mode=:pdf)
-        w_angle_0[(i-1) ÷ NMAX + 1, (i-1) % NMAX + 1] = h_0_norm.weights[1]
+        if isempty(w_tau_S_n[i])
+            w_angle_0[(i-1) ÷ NMAX + 1, (i-1) % NMAX + 1] = 0.0
+        else
+            h_0 = StatsBase.fit(Histogram, w_tau_S_n[i] ./ mean(w_tau_S_n[i]), 
+                                nbins=N_BINS)
+            h_0_norm = normalize(h_0, mode=:pdf)
+            w_angle_0[(i-1) ÷ NMAX + 1, (i-1) % NMAX + 1] = h_0_norm.weights[1]
+        end
         print(i, "\n")
     end
 end
 
-h = fit(Histogram, w_tau_S_n[6] ./ mean(w_tau_S_n[6]), nbins=1001)
+h = fit(Histogram, w_tau_S_n[6] ./ mean(w_tau_S_n[6]), nbins=N_BINS)
 h_0 = normalize(h, mode=:pdf)
-h_0
-n0, bins0, patches0 = PyPlot.hist(w_tau_S_n[6] ./ mean(w_tau_S_n[6]), bins=500, density=true, alpha=0.5, histtype="bar", label=L"w_n(\tau / \bar{\tau})")
+n0, bins0, patches0 = PyPlot.hist(w_tau_S_n[6] ./ mean(w_tau_S_n[6]), bins=N_BINS÷2, density=true, alpha=0.5, histtype="bar", label=L"w_n(\tau / \bar{\tau})")
 
 begin
-    const N_BINS = N_BINS ÷ 2
     fig_03, axs = plt.subplots(1, 1, sharey=true, tight_layout=true, figsize=(6,3))
     idx = 6
     # axs.plot(test[1:1000])
@@ -250,7 +256,7 @@ begin
     axs.hist(w_tau_S_n[idx] ./ mean(w_tau_S_n[idx]), bins=N_BINS, density=true, alpha=0.5, histtype="bar", label=L"w_n(\tau / \bar{\tau})")
     axs.plot(bins[1:end-1], γ*exp.(-γ*bins[1:end-1]), color="red", label=L"\gamma \exp(-\gamma \tau / \bar{\tau})")
     axs.plot(h_0.edges[1][1:end-1], h_0.weights, color="blue")
-    axs.set_xlim((0, 1))
+    axs.set_xlim((0, 5))
     # axs.set_ylim((0, 2))
     # axs.set_yscale("log")
     axs.set_xlabel(L"\tau / \bar{\tau}")
@@ -279,12 +285,15 @@ begin
     y_at = [pos[i][2] for i = 1:N]
     z_at = [pos[i][3] for i = 1:N]
 
-    WGLMakie.activate!()
+    GLMakie.activate!()
     fig, ax, pltobj = surface(X, Y, Z; shading = true, ambient = Vec3f(0.65, 0.65, 0.65),
         backlight = 1.0f0, color = sqrt.(X .^ 2 .+ Y .^ 2 .+ Z .^ 2),
         colormap = :viridis, transparency = true,
         figure = (; resolution = (1200, 800), fontsize = 22),
-        axis=(type=Axis3, aspect = :data, azimuth = 2*pi/12, elevation = pi/30))
+        axis=(type=Axis3, aspect = :data, 
+              azimuth = 2*pi/12, elevation = pi/30,
+            #   limits=(-2,2,-2,2,-2,2)
+              ))
     meshscatter!(ax, x_at, y_at, z_at; color = "black",
                 markersize = 0.05)
     wireframe!(X, Y, Z; overdraw = true, transparency = true, color = (:black, 0.1))
