@@ -187,20 +187,25 @@ psi_ss_S = psi_t_S[end]
 
 D = [AtomicArraysStatistics.jump_op_direct_detection(phi_var[(i-1) % NMAX + 1], theta_var[(i-1) ÷ NMAX + 1], dΩ[(i-1) ÷ NMAX + 1, (i-1) % NMAX + 1], S, 2π, J) for i = 1:NMAX*(NMAX ÷ 2)]
 
+@btime begin
 tout_S, psi_t, jump_t_S, jump_i_S = timeevolution.mcwf([0:5e4:5e6;], psi_ss_S, H, D; display_jumps=true, maxiters=1e15)
+end
 
 # Time evolution
 begin
-    # TODO: understand why the distributed computations fail for large N_traj
+    # TODO: get rid of appends
     T_wtau = [0:5e3:5e4;]
     _, _, jump_t_S, jump_i_S = timeevolution.mcwf(T_wtau, psi_ss_S, H, D; 
-                                    display_jumps=true, maxiters=1e15)
+                                    display_jumps=true, maxiters=1e15);
     progress = Progress(N_traj)
-    Threads.@threads for i=1:N_traj
+    lk = ReentrantLock()
+    Threads.@threads for i=1:100#N_traj
         _, _, jump_t_S_0, jump_i_S_0 = timeevolution.mcwf(T_wtau, psi_ss_S, 
-                                H, D; display_jumps=true, maxiters=1e15)
-        append!(jump_t_S, jump_t_S_0)
-        append!(jump_i_S, jump_i_S_0)
+                                H, D; display_jumps=true, maxiters=1e15);
+        lock(lk) do
+            append!(jump_t_S, jump_t_S_0)
+            append!(jump_i_S, jump_i_S_0)
+        end
         next!(progress)
     end
 end
