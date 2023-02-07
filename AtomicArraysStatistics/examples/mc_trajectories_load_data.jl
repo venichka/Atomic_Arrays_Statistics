@@ -108,135 +108,16 @@ function load_jump_data()
 end
 
 
-"""Impinging field"""
-
-begin
-    x = range(-3.0, 3.0, NMAX)
-    y = 0.0
-    z = range(-5.0, 5.0, NMAX)
-    e_field = Matrix{ComplexF64}(undef, length(x), length(z))
-    for i in eachindex(x)
-        for j in eachindex(z)
-            e_field[i, j] = em_inc_function([x[i], y, z[j]], E_inc)[1]
-        end
-    end
-    # Plot
-    fig_0 = PyPlot.figure(figsize=(7, 4))
-    PyPlot.contourf(x, z, real(e_field)', 30)
-    for p in pos
-        PyPlot.plot(p[1], p[3], "o", color="w", ms=2)
-    end
-    PyPlot.xlabel("x")
-    PyPlot.ylabel("z")
-    PyPlot.colorbar(label="Amplitude")
-    display(fig_0)
-end
-
-"System Hamiltonian"
-
-Γ, J = AtomicArrays.quantum.JumpOperators(S)
-Jdagger = dagger.(J)
-Ω = AtomicArrays.interaction.OmegaMatrix(S)
-H = AtomicArrays.quantum.Hamiltonian(S) - sum(Om_R[j] * J[j] +
-                                              conj(Om_R[j]) * Jdagger[j]
-                                              for j = 1:N)
-H.data
-
-# eigen(dense(H).data)
-w, v = eigenstates(dense(H))
-
-# Jump operators description
-J_s = AtomicArraysStatistics.jump_op_source_mode(Γ, J)
-# d, D_op = diagonaljumps(Γ, J)
-
-"Dynamics"
-
-# Initial state (Bloch state)
-const phi = 0.0
-const theta = pi / 1.0
-
-embed(op::Operator,i) = QuantumOptics.embed(AtomicArrays.quantum.basis(S), i, op)
-
-sx_av = zeros(Float64, N, length(T))
-sy_av = zeros(Float64, N, length(T))
-sz_av = zeros(Float64, N, length(T))
-function fout(t::Float64, psi::Ket)
-    j = findfirst(isequal(t), T)
-    for i = 1:N
-        sx_av[i, j] += real(expect(embed(sx, i), psi) / norm(psi)^2)
-        sy_av[i, j] += real(expect(embed(sy, i), psi) / norm(psi)^2)
-        sz_av[i, j] += real(expect(embed(sz, i), psi) / norm(psi)^2)
-    end
-    return nothing
-end
-
-# Time evolution
-psi0 = AtomicArrays.quantum.blochstate(phi, theta, N)
-Threads.@threads for i=1:N_traj
-    timeevolution.mcwf(T, psi0, H, J_s; fout=fout)
-end
-sx_av ./= N_traj
-sy_av ./= N_traj
-sz_av ./= N_traj
-
-
-"Waiting time distributions and g2 functions"
-
-"WTD for J operators"
-
-tout, psi_t = timeevolution.mcwf(T, psi0, H, J_s)
-psi_ss = psi_t[end]
-tout, psi_t, jump_t, jump_i = timeevolution.mcwf([0:500.0:5e5;], psi_ss, H, J_s; display_jumps=true)
-
-length(jump_t)
-length(jump_i)
-
-w_tau = [jump_t[j+1] - jump_t[j] for j in 1:(length(jump_t) - 1)]
-w_tau_1 = [jump_t[jump_i .== 1][j+1] - jump_t[jump_i .== 1][j] for j in 1:(length(jump_t[jump_i .== 1]) - 1)]
-w_tau_2 = [jump_t[jump_i .== 2][j+1] - jump_t[jump_i .== 2][j] for j in 1:(length(jump_t[jump_i .== 2]) - 1)]
-w_tau_av = mean(w_tau)
-w_tau_1_av = mean(w_tau_1)
-w_tau_2_av = mean(w_tau_2)
-
-
 "WTD for S(θ, ϕ) operators"
+
+theta_var, phi_var, jump_t_S, jump_i_S = load_jump_data()
+
+const NMAX = length(phi_var)
 
 d_angle = 2.0 / NMAX * pi 
 
-phi_var = [(i-0.5)*d_angle for i = 1:NMAX]
-theta_var = [(i-0.5)*d_angle for i = 1:NMAX ÷ 2]
 # dΩ = sin(θ) dθ dϕ
 dΩ = [d_angle * d_angle * sin(theta_var[i]) for i = 1:NMAX ÷ 2, j = 1:NMAX]
-
-# Computing steady states
-_, psi_t_S = timeevolution.mcwf(T, psi0, H, J_s)
-psi_ss_S = psi_t_S[end]
-
-D = [AtomicArraysStatistics.jump_op_direct_detection(phi_var[(i-1) % NMAX + 1], theta_var[(i-1) ÷ NMAX + 1], dΩ[(i-1) ÷ NMAX + 1, (i-1) % NMAX + 1], S, 2π, J) for i = 1:NMAX*(NMAX ÷ 2)]
-
-@btime begin
-tout_S, psi_t, jump_t_S, jump_i_S = timeevolution.mcwf([0:5e4:5e6;], psi_ss_S, H, D; display_jumps=true, maxiters=1e15)
-end
-
-# Time evolution
-begin
-    # TODO: get rid of appends
-    tau_max = 5e5
-    T_wtau = [0:tau_max/100:tau_max;]
-    _, _, jump_t_S, jump_i_S = timeevolution.mcwf(T_wtau, psi_ss_S, H, D; 
-                                    display_jumps=true, maxiters=1e15);
-    progress = Progress(N_traj)
-    lk = ReentrantLock()
-    Threads.@threads for i=1:N_traj
-        _, _, jump_t_S_0, jump_i_S_0 = timeevolution.mcwf(T_wtau, psi_ss_S, 
-                                H, D; display_jumps=true, maxiters=1e15);
-        lock(lk) do
-            append!(jump_t_S, jump_t_S_0)
-            append!(jump_i_S, jump_i_S_0)
-        end
-        next!(progress)
-    end
-end
 
 length(jump_t_S)
 length(jump_i_S)
@@ -299,9 +180,6 @@ begin
     # fig_03.savefig(PATH_FIGS * "wtau_g2_N" * string(N) * "_" * "jump_" * DIRECTION * ".pdf", dpi=300)
 end
 
-for i=1:NMAX*NMAX ÷2
-    print(length(w_tau_S_n[i]), "\n")
-end
 
 begin
     fig_04, axs = plt.subplots(1, 1, sharey=true, tight_layout=true, figsize=(6,6))
@@ -356,82 +234,3 @@ begin
     colsize!(fig.layout, 1, Aspect(1, 1.0))
     fig
 end
-
-
-"""Writing DATA"""
-
-
-# fig_1.savefig(PATH_FIGS*"obj4D_lattice_4x4_mf_nit10.png", dpi=300)
-
-data_dict_jumps_S = Dict("theta" => collect(theta_var), "phi" => collect(phi_var), 
-                     "jump_times" => jump_t_S, "jump_op_idx" => jump_i_S)
-
-time_str = @sprintf "%.0E" tau_max*N_traj
-NAME_PART = string(N)*"atoms_tmax"*time_str*"_nmax"*string(NMAX)*"_"*DIRECTION*".h5"
-save(PATH_DATA*"jumps_"*NAME_PART, data_dict_jumps_S)
-
-data_dict_loaded = load(PATH_DATA*"jumps_"*NAME_PART)
-data_dict_loaded["jump_times"] == data_dict_jumps_S["jump_times"]
-
-
-
-"g2 function"
-
-tau_0 = [0:0.5:1000;]
-ρ_ss = QuantumOptics.steadystate.eigenvector(H, J; rates=Γ)  # finding the steady-state
-g2 = AtomicArraysStatistics.coherence_function_g2(tau_0, H, J_s, J_s[1] + J_s[2]; rho0=ρ_ss)
-g2_1 = AtomicArraysStatistics.coherence_function_g2(tau_0, H, J_s, J_s[1]; rho0=ρ_ss)
-g2_2 = AtomicArraysStatistics.coherence_function_g2(tau_0, H, J_s, J_s[2]; rho0=ρ_ss)
-
-A = dagger(J_s[2])
-B = dagger(J_s[1]) * J_s[1]
-C = J_s[2]
-n_ss_1 = QuantumOptics.expect(B, ρ_ss)
-n_ss_2 = QuantumOptics.expect(A*C, ρ_ss)
-G2 = AtomicArraysStatistics.correlation_3op_1t(tau_0, ρ_ss, H, J, A, B, C;
-                                               rates=Γ)
-g2 = G2 / (n_ss_1 * n_ss_2)
-
-begin
-    const N_BINS = 500
-    fig_02, axs = plt.subplots(1, 1, sharey=true, tight_layout=true, figsize=(6,3))
-    n, bins, patches = axs.hist(w_tau / w_tau_av, bins=N_BINS, density=true, histtype="bar", label=L"w(\tau / \bar{\tau})")
-    axs.plot(bins[1:end-1], n)
-    axs.hist(w_tau_2 / w_tau_2_av, bins=N_BINS, alpha=0.3, density=true, histtype="bar", label=L"w_1(\tau / \bar{\tau})")
-    axs.hist(w_tau_1 / w_tau_1_av, bins=N_BINS, alpha=0.3, density=true, histtype="bar", label=L"w_2(\tau / \bar{\tau})")
-    axs.plot(bins[1:end-1], γ*exp.(-γ*bins[1:end-1]), color="red", label=L"\gamma \exp(-\gamma \tau / \bar{\tau})")
-    axs.plot(tau_0/w_tau_1_av, g2_1, color="blue", label=L"g^{(2)}_1(\tau / \bar{\tau})")
-    axs.plot(tau_0/w_tau_2_av, g2_2, "--", color="blue", label=L"g^{(2)}_2(\tau / \bar{\tau})")
-    axs.plot(tau_0/w_tau_av, g2, ":", color="blue", label=L"g^{(2)}(\tau / \bar{\tau})")
-    axs.set_xlim((0, 5))
-    axs.set_ylim((0, 1))
-    axs.set_xlabel(L"\tau / \bar{\tau}")
-    axs.set_ylabel(L"w(\tau / \bar{\tau}), g^{2}(\tau / \bar{\tau})")
-    axs.legend(loc="upper right")
-    display(fig_02)
-    # fig_02.savefig(PATH_FIGS * "wtau_g2_N" * string(N) * "_" * "jump_" * DIRECTION * ".pdf", dpi=300)
-end
-
-
-
-fig_01, ax = plt.subplots(3, 1, figsize=(6,9), constrained_layout = true)
-for i = 1:N
-    ax[1].plot(T, sx_av[i, :], label="atom "*string(i))
-end
-ax[1].grid(true)
-ax[1].set_ylabel(L"\sigma_x")
-ax[1].legend()
-for i = 1:N
-    ax[2].plot(T, sy_av[i, :], label="atom "*string(i))
-end
-ax[2].grid(true)
-ax[2].set_ylabel(L"\sigma_y")
-ax[2].legend()
-for i = 1:N
-    ax[3].plot(T, sz_av[i, :], label="atom "*string(i))
-end
-ax[3].grid(true)
-ax[3].set_ylabel(L"\sigma_z")
-ax[3].legend()
-ax[3].set_xlabel(L"t")
-display(fig_01)
