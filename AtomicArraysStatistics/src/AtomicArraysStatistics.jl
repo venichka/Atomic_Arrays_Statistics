@@ -39,6 +39,22 @@ function correlation_3op_1t(tspan, rho0::Operator, H::AbstractOperator, J,
     return u
 end
 
+"""
+    AtomicArraysStatistics.correlation_3op_1t(rho0, H, J, A, B, C; <keyword arguments>)
+Calculate steady-state correlation values ``⟨A(0)B(0)C(0)⟩``.
+The calculation is done by multiplying the initial density operator
+with ``C \\rho A`` and then calculating the expectation value ``\\mathrm{Tr} \\{B C \\rho A\\}``
+# Arguments
+* `rho0`: Initial density operator.
+* `A`: Operator at time `t=0`.
+* `B`: Operator at time `t=\\tau`.
+* `C`: Operator at time `t=0`.
+* `kwargs...`: Further arguments are passed on to the ode solver.
+"""
+function correlation_3op_1t(rho0::Operator, A, B, C; kwargs...)
+    return expect(B, C*rho0*A)
+end
+
 
 """
     AtomicArraysStatistics.coherence_function_g2([tspan, ]rho0, H, J, A_op; <keyword arguments>)

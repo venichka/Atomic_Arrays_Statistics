@@ -220,7 +220,6 @@ end
 
 # Time evolution
 begin
-    # TODO: get rid of appends
     tau_max = 5e5
     T_wtau = [0:tau_max/100:tau_max;]
     _, _, jump_t_S, jump_i_S = timeevolution.mcwf(T_wtau, psi_ss_S, H, D; 
