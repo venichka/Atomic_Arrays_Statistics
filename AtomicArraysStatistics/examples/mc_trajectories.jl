@@ -188,20 +188,33 @@ sz_av ./= N_traj
 
 tout, psi_t = timeevolution.mcwf(T, psi0, H, J_s)
 psi_ss = psi_t[end]
-tout, psi_t, jump_t, jump_i = timeevolution.mcwf([0:500.0:5e5;], psi_ss, H, J_s; display_jumps=true, maxiters=1e15)
+tout, psi_t, jump_t, jump_i = timeevolution.mcwf([0:500.0:5e6;], psi_ss, H, J_s; display_jumps=true, maxiters=1e15)
 
 length(jump_t)
 length(jump_i)
 
-jump_t_1 = jump_t[jump_i .== 1]
-jump_t_2 = jump_t[jump_i .== 2]
 w_tau = [jump_t[j+1] - jump_t[j] for j in 1:(length(jump_t) - 1)]
-w_tau_1 = [jump_t_1[j+1] - jump_t_1[j] for j in 1:(length(jump_t_1) - 1)]
-w_tau_2 = [jump_t_2[j+1] - jump_t_2[j] for j in 1:(length(jump_t_2) - 1)]
+begin  # compute WTD by the angle
+    w_tau_n = []
+    idx_no_stat = []
+    for i = 1:N
+        jumps = jump_t[jump_i .== i]
+        jumps_dist = [jumps[j+1] - jumps[j] 
+                    for j in 1:(length(jumps) - 1)]
+        jumps_dist = jumps_dist[jumps_dist .>= 0]
+        if isempty(jumps_dist)
+            append!(idx_no_stat, i)
+            print(i, " ")
+        end
+        push!(w_tau_n, jumps_dist)
+    end
+    print("w_tau_n computed.\n")
+end
+w_tau_1 = w_tau_n[1]
+w_tau_2 = w_tau_n[2]
 w_tau_av = mean(w_tau)
 w_tau_1_av = mean(w_tau_1)
 w_tau_2_av = mean(w_tau_2)
-
 
 "WTD for S(θ, ϕ) operators"
 
@@ -218,9 +231,9 @@ psi_ss_S = psi_t_S[end]
 
 D = [AtomicArraysStatistics.jump_op_direct_detection(phi_var[(i-1) % NMAX + 1], theta_var[(i-1) ÷ NMAX + 1], dΩ[(i-1) ÷ NMAX + 1, (i-1) % NMAX + 1], S, 2π, J) for i = 1:NMAX*(NMAX ÷ 2)]
 
-# begin
-# tout_S, psi_t, jump_t_S, jump_i_S = timeevolution.mcwf([0:5e4:5e6;], psi_ss_S, H, D; display_jumps=true, maxiters=1e15)
-# end
+begin
+tout_S, psi_t, jump_t_S, jump_i_S = timeevolution.mcwf([0:5e4:5e6;], psi_ss_S, H, D; display_jumps=true, maxiters=1e15)
+end
 
 # Time evolution
 begin
