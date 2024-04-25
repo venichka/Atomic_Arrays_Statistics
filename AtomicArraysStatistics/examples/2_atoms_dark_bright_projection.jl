@@ -66,7 +66,7 @@ begin
 end
 
 progress = Progress(2 * NMAX * NMAX * NMAX)
-Threads.@threads for kkiijjmm in CartesianIndices((2, NMAX, NMAX, NMAX))
+for kkiijjmm in CartesianIndices((2, NMAX, NMAX, NMAX))
     (kk, ii, jj, mm) = (Tuple(kkiijjmm)[1], Tuple(kkiijjmm)[2], 
     Tuple(kkiijjmm)[3], Tuple(kkiijjmm)[4])
 
@@ -78,7 +78,7 @@ Threads.@threads for kkiijjmm in CartesianIndices((2, NMAX, NMAX, NMAX))
     # Atoms
 
     pos = geometry.chain_dir(a, N; dir="z", pos_0=[0, 0, -a / 2])
-    Delt = [(i < N) ? 0.0 : Delt_0 for i = 1:N]
+    Delt = [(i < N) ? - Delt_0 / 2 : Delt_0 / 2 for i = 1:N]
     S = SpinCollection(pos, e_dipole; gammas=γ, deltas=Delt)
 
     # Incident field
@@ -109,22 +109,26 @@ Threads.@threads for kkiijjmm in CartesianIndices((2, NMAX, NMAX, NMAX))
                                                   conj(Om_R[j]) * Jdagger[j]
                                                   for j = 1:N)
     # Dark and Bright states
+    # ψ_D = 1.0/sqrt(2.0) * (Ket(basis(H), [0,1,0,0]) - 
+    #                        sign(Γ[1,2])*Ket(basis(H), [0,0,1,0]))
     ψ_D = 1.0/sqrt(2.0) * (Ket(basis(H), [0,1,0,0]) - 
-                           sign(Γ[1,2])*Ket(basis(H), [0,0,1,0]))
+                           Ket(basis(H), [0,0,1,0]))
     ρ_D = ψ_D ⊗ dagger(ψ_D)
+    # ψ_B = 1.0/sqrt(2.0) * (Ket(basis(H), [0,1,0,0]) + 
+    #                        sign(Γ[1,2])*Ket(basis(H), [0,0,1,0]))
     ψ_B = 1.0/sqrt(2.0) * (Ket(basis(H), [0,1,0,0]) + 
-                           sign(Γ[1,2])*Ket(basis(H), [0,0,1,0]))
+                           Ket(basis(H), [0,0,1,0]))
     ρ_B = ψ_B ⊗ dagger(ψ_B)
 
     # Steady-state
-#   ρ_ss = QuantumOptics.steadystate.eigenvector(H, J; rates=Γ)
+    ρ_ss = QuantumOptics.steadystate.eigenvector(H, J; rates=Γ)
 
-    phi = 0.
-    theta = pi/1.
-    Ψ₀ = AtomicArrays.quantum.blochstate(phi,theta,N)
-    ρ₀ = Ψ₀⊗dagger(Ψ₀)
-    _, ρ_t = QuantumOptics.timeevolution.master_h(T, ρ₀, H, J; rates=Γ)
-    ρ_ss = ρ_t[end]
+    # phi = 0.
+    # theta = pi/1.
+    # Ψ₀ = AtomicArrays.quantum.blochstate(phi,theta,N)
+    # ρ₀ = Ψ₀⊗dagger(Ψ₀)
+    # _, ρ_t = QuantumOptics.timeevolution.master_h(T, ρ₀, H, J; rates=Γ)
+    # ρ_ss = ρ_t[end]
 
     # Projections
     projections_D[kk, ii, jj, mm] = real(tr(ρ_ss * ρ_D))
@@ -138,36 +142,49 @@ maximum(projections_D[1,..])
 maximum(projections_B[1,..])
 
 begin
-    eff_D = AtomicArrays.field.objective(projections_B[1,..], projections_B[2,..]);
+    eff_D = AtomicArrays.field.objective(projections_D[1,..], projections_D[2,..]);
+    eff_B = AtomicArrays.field.objective(projections_B[1,..], projections_B[2,..]);
     (maximum(eff_D), argmax(eff_D), (Delt_list[argmax(eff_D)[1]], E_list[argmax(eff_D)[2]], d_list[argmax(eff_D)[3]]))
 end
 
 let
     # Position of the maximum
-    perm = sortperm([maximum(projections_D[2, :, i, :]) for i = 1:NMAX],
-                    rev=true)
-    idx = 12
-    (perm[idx], argmax(projections_D[2, :, perm[idx], :])[1], maximum(projections_D[2, :, perm[idx], :]), 
-    (Delt_list[argmax(projections_D[2, :, perm[idx], :])[1]], E_list[perm[idx]], d_list[argmax(projections_D[2, :, perm[idx], :])[2]]))
+    idx_R = argmax(projections_D[1,..])
+    idx_L = argmax(projections_D[2,..])
+    (projections_D[1, idx_R], projections_D[2, idx_L], 
+    (Delt_list[idx_R[1]], E_list[idx_R[2]], d_list[idx_R[3]]))
+end
 
+begin
+    # max contrast position
+    idx_D = argmax(eff_D)
+    idx_B = argmax(eff_B)
+    (Delt_list[idx_D[1]], E_list[idx_D[2]], d_list[idx_D[3]])
 end
 
 
 let
     idx = 13
+
     x = Delt_list
     y = d_list
-    c_D_1 = projections_B[1, :, idx, :]
-    c_D_2 = projections_B[2, :, idx, :]
+    c_D_1 = projections_D[1, :, idx, :]
+    c_D_2 = projections_D[2, :, idx, :]
     cmap = "viridis"
+
+    id_max_R = argmax(projections_D[1, :, idx, :])
+    id_max_L = argmax(projections_D[2, :, idx, :])
 
     fig, ax = plt.subplots(1, 2, figsize=(9,3))
     im1 = ax[1].pcolormesh(x, y, c_D_1', cmap=cmap)
+    ax[1].scatter([x[id_max_R[1]]], [y[id_max_R[2]]], c="r")
     ax[1].set_title(L"R")
     ax[1].set_xlabel(L"\Delta")
     ax[1].set_ylabel(L"a")
+    # ax[1].set_ylim(0.42,0.46)
     fig.colorbar(im1, ax=ax[1])
     im2 = ax[2].pcolormesh(x, y, c_D_2', cmap=cmap)
+    ax[2].scatter([x[id_max_L[1]]], [y[id_max_L[2]]], c="b")
     ax[2].set_title(L"L")
     ax[2].set_xlabel(L"\Delta")
     fig.colorbar(im2, ax=ax[2])
@@ -175,23 +192,36 @@ let
 end
 
 let
-    idx = 13
+    idx = 11
     x = Delt_list
     y = d_list
     c_D_1 = eff_D[:, idx, :]
+    c_D_2 = eff_B[:, idx, :]
     cmap = "viridis"
 
-    fig, ax = plt.subplots(1, 1, figsize=(4,3))
-    im1 = ax.pcolormesh(x, y, c_D_1', cmap=cmap)
-    ax.set_title("Contrast for B population")
-    ax.set_xlabel(L"\Delta")
-    ax.set_ylabel(L"a")
-    fig.colorbar(im1, ax=ax)
+    id_max_D = argmax(eff_D[:, idx, :])
+    id_max_B = argmax(eff_B[:, idx, :])
+
+    fig, ax = plt.subplots(1, 2, figsize=(9,3))
+    im1 = ax[1].pcolormesh(x, y, c_D_1', cmap=cmap, 
+                        # vmin=0, vmax=0.2
+                        )
+    ax[1].scatter([x[id_max_D[1]]], [y[id_max_D[2]]], c="r")
+    ax[1].set_title("Contrast for D population")
+    ax[1].set_xlabel(L"\Delta")
+    ax[1].set_ylabel(L"a")
+    fig.colorbar(im1, ax=ax[1])
+
+    im2 = ax[2].pcolormesh(x, y, c_D_2', cmap=cmap,
+                          # vmin=0, vmax=0.2
+                          )
+    ax[2].scatter([x[id_max_B[1]]], [y[id_max_B[2]]], c="r")
+    ax[2].set_title("Contrast for B population")
+    ax[2].set_xlabel(L"\Delta")
+    fig.colorbar(im2, ax=ax[2])
     fig
 end
 
-projections_D[2, 17, 7, 2]
-(Delt_list[17], E_list[7], d_list[2])
 
 let
 

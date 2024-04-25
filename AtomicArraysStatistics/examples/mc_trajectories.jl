@@ -14,13 +14,15 @@ end
 using LinearAlgebra
 using Statistics, StatsBase
 using QuantumOptics
+using PyCall
+PyCall.pygui(:qt5)
 using PyPlot
 using GLMakie
 using WGLMakie
 using AtomicArrays
 using Revise
 using BenchmarkTools
-using ProgressMeter
+using ProgressMeter, Suppressor
 using HDF5, FileIO, Printf
 
 using AtomicArraysStatistics
@@ -29,7 +31,7 @@ const EMField = field.EMField
 # const em_inc_function = AtomicArrays.field.gauss
 const em_inc_function = AtomicArrays.field.plane
 const NMAX = 10
-const N_traj = 1000
+const N_traj = 10
 const NMAX_T = 5
 const N_BINS = 1000
 const DIRECTION = "R"
@@ -47,7 +49,7 @@ end
 
 # System parameters
 begin
-    const a = 0.18
+    const a = 0.21
     const γ = 1.0
     const e_dipole = [1.0, 0, 0]
     const T = [0:0.05:500;]
@@ -55,7 +57,7 @@ begin
     const Ncenter = 1
 
     const pos = geometry.chain_dir(a, N; dir="z", pos_0=[0, 0, -a / 2])
-    const Delt = [(i < N) ? 0.0 : 0.5 for i = 1:N]
+    const Delt = [(i < N) ? -1.184/2 : 1.184/2 for i = 1:N]
     const S = SpinCollection(pos, e_dipole; gammas=γ, deltas=Delt)
 
     # Define Spin 1/2 operators
@@ -68,7 +70,7 @@ begin
     I_spin = identityoperator(spinbasis)
 
     # Incident field
-    E_ampl = 0.2 + 0im
+    E_ampl = 0.497 + 0im
     E_kvec = 2π
     if (DIRECTION == "R")
         E_pos0 = [0.0, 0.0, 0.0]
@@ -172,7 +174,7 @@ end
 
 # Time evolution
 psi0 = AtomicArrays.quantum.blochstate(phi, theta, N)
-Threads.@threads for i=1:N_traj
+@suppress_err Threads.@threads for i=1:N_traj
     timeevolution.mcwf(T, psi0, H, J_s; fout=fout)
 end
 sx_av ./= N_traj
@@ -214,9 +216,9 @@ psi_ss_S = psi_t_S[end]
 
 D = [AtomicArraysStatistics.jump_op_direct_detection(phi_var[(i-1) % NMAX + 1], theta_var[(i-1) ÷ NMAX + 1], dΩ[(i-1) ÷ NMAX + 1, (i-1) % NMAX + 1], S, 2π, J) for i = 1:NMAX*(NMAX ÷ 2)]
 
-@btime begin
-tout_S, psi_t, jump_t_S, jump_i_S = timeevolution.mcwf([0:5e4:5e6;], psi_ss_S, H, D; display_jumps=true, maxiters=1e15)
-end
+# @btime begin
+# tout_S, psi_t, jump_t_S, jump_i_S = timeevolution.mcwf([0:5e4:5e6;], psi_ss_S, H, D; display_jumps=true, maxiters=1e15)
+# end
 
 # Time evolution
 begin
@@ -224,8 +226,8 @@ begin
     T_wtau = [0:tau_max/100:tau_max;]
     _, _, jump_t_S, jump_i_S = timeevolution.mcwf(T_wtau, psi_ss_S, H, D; 
                                     display_jumps=true, maxiters=1e15);
-    progress = Progress(N_traj)
     lk = ReentrantLock()
+    progress = Progress(N_traj)
     Threads.@threads for i=1:N_traj
         _, _, jump_t_S_0, jump_i_S_0 = timeevolution.mcwf(T_wtau, psi_ss_S, 
                                 H, D; display_jumps=true, maxiters=1e15);
@@ -235,7 +237,8 @@ begin
         end
         next!(progress)
     end
-end
+    finish!(progress)
+end;
 
 length(jump_t_S)
 length(jump_i_S)
@@ -278,7 +281,7 @@ end
 
 
 begin
-    idx = 48
+    idx = 25
     h = fit(Histogram, w_tau_S_n[idx] ./ mean(w_tau_S_n[idx]), nbins=N_BINS)
     h_0 = normalize(h, mode=:pdf)
     
