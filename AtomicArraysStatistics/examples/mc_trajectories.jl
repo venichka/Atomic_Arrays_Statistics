@@ -30,11 +30,11 @@ using AtomicArraysStatistics
 const EMField = field.EMField
 # const em_inc_function = AtomicArrays.field.gauss
 const em_inc_function = AtomicArrays.field.plane
-const NMAX = 10
-const N_traj = 10
+const NMAX = 30
+const N_traj = 100
 const NMAX_T = 5
 const N_BINS = 1000
-const DIRECTION = "R"
+const DIRECTION = "L"
 tau_max = 5e5
 
 const PATH_FIGS, PATH_DATA = AtomicArraysStatistics.path()
