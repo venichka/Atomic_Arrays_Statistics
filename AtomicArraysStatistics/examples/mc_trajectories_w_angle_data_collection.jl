@@ -121,6 +121,9 @@ begin
     dΩ = [d_angle * d_angle * sin(theta_var[i]) for i = 1:NMAX ÷ 2, j = 1:NMAX]
 
     # Computing steady states
+    phi = 0.0
+    theta = pi / 1.0
+    psi0 = AtomicArrays.quantum.blochstate(phi, theta, N)
     _, psi_t_S = timeevolution.mcwf(T, psi0, H, J_s)
     psi_ss_S = psi_t_S[end]
 
