@@ -31,7 +31,6 @@ function idx_1D_to_2D(i, nmax)
     return CartesianIndex((i - 1) ÷ nmax + 1, (i - 1) % nmax + 1)
 end
 
-
 # parameters for computing
 begin
     const EMField = field.EMField
@@ -132,43 +131,42 @@ end
 
 # Time evolution
 begin
-    tau_max = 5e5
     T_wtau = [0:tau_max/100:tau_max;]
-    _, _, jump_t_S, jump_i_S = timeevolution.mcwf(T_wtau, psi_ss_S, H, D; 
-                                    display_jumps=true, maxiters=1e15);
+    jump_t_S = Float64[]
+    jump_i_S = Int[]
     lk = ReentrantLock()
-    progress = Progress(N_traj)
-    Threads.@threads for i=1:N_traj
-        _, _, jump_t_S_0, jump_i_S_0 = timeevolution.mcwf(T_wtau, psi_ss_S, 
-                                H, D; display_jumps=true, maxiters=1e15);
+
+    function compute_jumps(T, psi_ss, H, J_s, jump_t, jump_i, progress)
+        _, _, jump_t_0, jump_i_0 = timeevolution.mcwf(T, psi_ss, H, J_s;
+                                                    display_jumps=true, maxiters=1e15)
         lock(lk) do
-            append!(jump_t_S, jump_t_S_0)
-            append!(jump_i_S, jump_i_S_0)
+            append!(jump_t, jump_t_0)
+            append!(jump_i, jump_i_0)
         end
         next!(progress)
     end
+
+    progress = Progress(N_traj)
+    Threads.@threads for _=1:N_traj
+        compute_jumps(T_wtau, psi_ss_S, H, D, jump_t_S, jump_i_S, progress)
+    end
     finish!(progress)
-    jump_t_S = convert(Array{Float32, 1}, jump_t_S)
-    println("S operator jumps computed")
+    println("S operators jumps computed")
 end;
 
 begin  # compute WTD by the angle
-    w_tau_S = [jump_t_S[j+1] - jump_t_S[j] for j in 1:(length(jump_t_S) - 1)]
-    w_tau_S = w_tau_S[w_tau_S .>= 0]
-    w_tau_S_n = []
-    idx_no_stat = []
-    for i = 1:NMAX*(NMAX ÷ 2)
-        jumps = jump_t_S[jump_i_S .== i]
-        jumps_dist = [jumps[j+1] - jumps[j] 
-                    for j in 1:(length(jumps) - 1)]
-        jumps_dist = jumps_dist[jumps_dist .>= 0]
-        if isempty(jumps_dist)
-            append!(idx_no_stat, i)
-            print(i, " ")
-        end
-        push!(w_tau_S_n, jumps_dist)
+    w_tau_S = AtomicArraysStatistics.compute_w_tau(jump_S_t)
+
+    # Initialize arrays outside the loop for efficiency
+    w_tau_S_n = Vector{Vector{Float64}}()
+    idx_no_stat_S = Int[]
+
+    # Iterate through indices and jumps
+    for i in eachindex(D)
+        AtomicArraysStatistics.compute_w_tau_n(w_tau_S_n, idx_no_stat_S,
+                                               jump_t_S, jump_i_S, i)
     end
-    print("w_tau_S_n computed.\n")
+    println("w_tau_S_n computed.")
 end
 
 begin # angle distribution (note that N_BINS for StatsBase should be x2 

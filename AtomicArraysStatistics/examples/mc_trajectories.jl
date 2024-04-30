@@ -11,33 +11,23 @@ begin
     Pkg.activate(PATH_ENV)
 end
 
-using LinearAlgebra
-using Statistics, StatsBase
-using QuantumOptics
-using PyCall
-PyCall.pygui(:qt5)
-using PyPlot
-using GLMakie
-using WGLMakie
-using AtomicArrays
-using Revise
-using BenchmarkTools
-using ProgressMeter, Suppressor
-using HDF5, FileIO, Printf
+begin
+    using LinearAlgebra
+    using Statistics, StatsBase
+    using QuantumOptics
+    using PyCall
+    PyCall.pygui(:qt5)
+    using PyPlot
+    using GLMakie
+    using WGLMakie
+    using AtomicArrays
+    using Revise
+    using BenchmarkTools
+    using ProgressMeter, Suppressor
+    using HDF5, FileIO, Printf
 
-using AtomicArraysStatistics
-
-const EMField = field.EMField
-# const em_inc_function = AtomicArrays.field.gauss
-const em_inc_function = AtomicArrays.field.plane
-const NMAX = 30
-const N_traj = 100
-const NMAX_T = 5
-const N_BINS = 1000
-const DIRECTION = "L"
-tau_max = 5e5
-
-const PATH_FIGS, PATH_DATA = AtomicArraysStatistics.path()
+    using AtomicArraysStatistics
+end
 
 function idx_2D_to_1D(i, j, nmax)
     return (i - 1) * nmax + j
@@ -46,6 +36,20 @@ end
 function idx_1D_to_2D(i, nmax)
     return CartesianIndex((i - 1) ÷ nmax + 1, (i - 1) % nmax + 1)
 end
+
+begin
+    const EMField = field.EMField
+    # const em_inc_function = AtomicArrays.field.gauss
+    const em_inc_function = AtomicArrays.field.plane
+    NMAX = 30
+    N_traj = 100
+    NMAX_T = 5
+    N_BINS = 1000
+    DIRECTION = "L"
+    tau_max = 5e5
+end
+
+const PATH_FIGS, PATH_DATA = AtomicArraysStatistics.path()
 
 # System parameters
 begin
@@ -93,22 +97,6 @@ begin
 
 end
 
-"""
-load_jump_data()
-
-Loads a dict with data according to the parameters specified in the workspace.
-
-* Output:
-- (theta_var, phi_var, jump_t, jump_i)
-"""
-function load_jump_data()
-    time_str = @sprintf "%.0E" tau_max*N_traj
-    NAME_PART = string(N)*"atoms_tmax"*time_str*"_nmax"*string(NMAX)*"_"*DIRECTION*".h5"
-
-    data_dict_loaded = load(PATH_DATA*"jumps_"*NAME_PART)
-    return data_dict_loaded["theta"],  data_dict_loaded["phi"], data_dict_loaded["jump_times"], data_dict_loaded["jump_op_idx"]
-end
-
 
 """Impinging field"""
 
@@ -136,77 +124,109 @@ end
 
 "System Hamiltonian"
 
-Γ, J = AtomicArrays.quantum.JumpOperators(S)
-Jdagger = dagger.(J)
-Ω = AtomicArrays.interaction.OmegaMatrix(S)
-H = AtomicArrays.quantum.Hamiltonian(S) - sum(Om_R[j] * J[j] +
-                                              conj(Om_R[j]) * Jdagger[j]
-                                              for j = 1:N)
-H.data
+begin
+    Γ, J = AtomicArrays.quantum.JumpOperators(S)
+    Jdagger = dagger.(J)
+    Ω = AtomicArrays.interaction.OmegaMatrix(S)
+    H = AtomicArrays.quantum.Hamiltonian(S) - sum(Om_R[j] * J[j] +
+                                                conj(Om_R[j]) * Jdagger[j]
+                                                for j = 1:N)
+    H.data
 
-# eigen(dense(H).data)
-w, v = eigenstates(dense(H))
+    # eigen(dense(H).data)
+    w, v = eigenstates(dense(H))
 
-# Jump operators description
-J_s = AtomicArraysStatistics.jump_op_source_mode(Γ, J)
-# d, D_op = diagonaljumps(Γ, J)
+    # Jump operators description
+    J_s = AtomicArraysStatistics.jump_op_source_mode(Γ, J)
+    # d, D_op = diagonaljumps(Γ, J)
+end
 
 "Dynamics"
 
-# Initial state (Bloch state)
-const phi = 0.0
-const theta = pi / 1.0
+begin
+    # Initial state (Bloch state)
+    phi = 0.0
+    theta = pi / 1.0
 
-embed(op::Operator,i) = QuantumOptics.embed(AtomicArrays.quantum.basis(S), i, op)
+    embed(op::Operator,i) = QuantumOptics.embed(AtomicArrays.quantum.basis(S), i, op)
 
-sx_av = zeros(Float64, N, length(T))
-sy_av = zeros(Float64, N, length(T))
-sz_av = zeros(Float64, N, length(T))
-function fout(t::Float64, psi::Ket)
-    j = findfirst(isequal(t), T)
-    for i = 1:N
-        sx_av[i, j] += real(expect(embed(sx, i), psi) / norm(psi)^2)
-        sy_av[i, j] += real(expect(embed(sy, i), psi) / norm(psi)^2)
-        sz_av[i, j] += real(expect(embed(sz, i), psi) / norm(psi)^2)
+    sx_av = zeros(Float64, N, length(T))
+    sy_av = zeros(Float64, N, length(T))
+    sz_av = zeros(Float64, N, length(T))
+    function fout(t::Float64, psi::Ket)
+        j = findfirst(isequal(t), T)
+        for i = 1:N
+            sx_av[i, j] += real(expect(embed(sx, i), psi) / norm(psi)^2)
+            sy_av[i, j] += real(expect(embed(sy, i), psi) / norm(psi)^2)
+            sz_av[i, j] += real(expect(embed(sz, i), psi) / norm(psi)^2)
+        end
+        return nothing
     end
-    return nothing
-end
 
-# Time evolution
-psi0 = AtomicArrays.quantum.blochstate(phi, theta, N)
-@suppress_err Threads.@threads for i=1:N_traj
-    timeevolution.mcwf(T, psi0, H, J_s; fout=fout)
+    # Time evolution
+    psi0 = AtomicArrays.quantum.blochstate(phi, theta, N)
+    @suppress_err Threads.@threads for i=1:N_traj
+        timeevolution.mcwf(T, psi0, H, J_s; fout=fout)
+    end
+    sx_av ./= N_traj
+    sy_av ./= N_traj
+    sz_av ./= N_traj
 end
-sx_av ./= N_traj
-sy_av ./= N_traj
-sz_av ./= N_traj
-
 
 "Waiting time distributions and g2 functions"
 
 "WTD for J operators"
 
-tout, psi_t = timeevolution.mcwf(T, psi0, H, J_s)
-psi_ss = psi_t[end]
-tout, psi_t, jump_t, jump_i = timeevolution.mcwf([0:500.0:5e6;], psi_ss, H, J_s; display_jumps=true, maxiters=1e15)
+begin
+    # Initial state (Bloch state)
+    phi = 0.0
+    theta = pi / 1.0
+    psi0 = AtomicArrays.quantum.blochstate(phi, theta, N)
+
+    # steady-state
+    tout, psi_t = timeevolution.mcwf(T, psi0, H, J_s)
+    psi_ss = psi_t[end]
+
+    # jumps computation
+    T_wtau = [0:tau_max/100:tau_max;]
+    jump_t = Float64[]
+    jump_i = Int[]
+    lk = ReentrantLock()
+
+    function compute_jumps(T, psi_ss, H, J_s, jump_t, jump_i, progress)
+        _, _, jump_t_0, jump_i_0 = timeevolution.mcwf(T, psi_ss, H, J_s;
+                                                    display_jumps=true, maxiters=1e15)
+        lock(lk) do
+            append!(jump_t, jump_t_0)
+            append!(jump_i, jump_i_0)
+        end
+        next!(progress)
+    end
+
+    progress = Progress(N_traj)
+    Threads.@threads for _=1:N_traj
+        compute_jumps(T_wtau, psi_ss, H, J_s, jump_t, jump_i, progress)
+    end
+
+    finish!(progress)
+    println("J operators jumps computed")
+
+end
 
 length(jump_t)
 length(jump_i)
 
-w_tau = [jump_t[j+1] - jump_t[j] for j in 1:(length(jump_t) - 1)]
-begin  # compute WTD by the angle
-    w_tau_n = []
-    idx_no_stat = []
-    for i = 1:N
-        jumps = jump_t[jump_i .== i]
-        jumps_dist = [jumps[j+1] - jumps[j] 
-                    for j in 1:(length(jumps) - 1)]
-        jumps_dist = jumps_dist[jumps_dist .>= 0]
-        if isempty(jumps_dist)
-            append!(idx_no_stat, i)
-            print(i, " ")
-        end
-        push!(w_tau_n, jumps_dist)
+
+begin  # compute WTD by a corresponding operator
+    w_tau = AtomicArraysStatistics.compute_w_tau(jump_t)
+
+    # Initialize arrays outside the loop for efficiency
+    w_tau_n = Vector{Vector{Float64}}()
+    idx_no_stat = Int[]
+    # Iterate through indices and jumps
+    for i in eachindex(J_s)
+        AtomicArraysStatistics.compute_w_tau_n(w_tau_n, idx_no_stat,
+                                               jump_t, jump_i, i)
     end
     print("w_tau_n computed.\n")
 end
@@ -218,64 +238,54 @@ w_tau_2_av = mean(w_tau_2)
 
 "WTD for S(θ, ϕ) operators"
 
-d_angle = 2.0 / NMAX * pi 
-
-phi_var = [(i-0.5)*d_angle for i = 1:NMAX]
-theta_var = [(i-0.5)*d_angle for i = 1:NMAX ÷ 2]
-# dΩ = sin(θ) dθ dϕ
-dΩ = [d_angle * d_angle * sin(theta_var[i]) for i = 1:NMAX ÷ 2, j = 1:NMAX]
-
-# Computing steady states
-_, psi_t_S = timeevolution.mcwf(T, psi0, H, J_s)
-psi_ss_S = psi_t_S[end]
-
-D = [AtomicArraysStatistics.jump_op_direct_detection(phi_var[(i-1) % NMAX + 1], theta_var[(i-1) ÷ NMAX + 1], dΩ[(i-1) ÷ NMAX + 1, (i-1) % NMAX + 1], S, 2π, J) for i = 1:NMAX*(NMAX ÷ 2)]
-
 begin
-tout_S, psi_t, jump_t_S, jump_i_S = timeevolution.mcwf([0:5e4:5e6;], psi_ss_S, H, D; display_jumps=true, maxiters=1e15)
+    d_angle = 2.0 / NMAX * pi 
+
+    phi_var = [(i-0.5)*d_angle for i = 1:NMAX]
+    theta_var = [(i-0.5)*d_angle for i = 1:NMAX ÷ 2]
+    # dΩ = sin(θ) dθ dϕ
+    dΩ = [d_angle * d_angle * sin(theta_var[i]) for i = 1:NMAX ÷ 2, j = 1:NMAX]
+
+    # Computing steady states
+    _, psi_t_S = timeevolution.mcwf(T, psi0, H, J_s)
+    psi_ss_S = psi_t_S[end]
+
+    D = [AtomicArraysStatistics.jump_op_direct_detection(phi_var[(i-1) % NMAX + 1], theta_var[(i-1) ÷ NMAX + 1], dΩ[(i-1) ÷ NMAX + 1, (i-1) % NMAX + 1], S, 2π, J) for i = 1:NMAX*(NMAX ÷ 2)]
 end
 
 # Time evolution
 begin
-    tau_max = 5e5
     T_wtau = [0:tau_max/100:tau_max;]
-    _, _, jump_t_S, jump_i_S = timeevolution.mcwf(T_wtau, psi_ss_S, H, D; 
-                                    display_jumps=true, maxiters=1e15);
+    jump_t_S = Float64[]
+    jump_i_S = Int[]
     lk = ReentrantLock()
+
     progress = Progress(N_traj)
-    Threads.@threads for i=1:N_traj
-        _, _, jump_t_S_0, jump_i_S_0 = timeevolution.mcwf(T_wtau, psi_ss_S, 
-                                H, D; display_jumps=true, maxiters=1e15);
-        lock(lk) do
-            append!(jump_t_S, jump_t_S_0)
-            append!(jump_i_S, jump_i_S_0)
-        end
-        next!(progress)
+    Threads.@threads for _=1:N_traj
+        compute_jumps(T_wtau, psi_ss_S, H, D, jump_t_S, jump_i_S, progress)
     end
     finish!(progress)
+    println("S operators jumps computed")
 end;
 
 length(jump_t_S)
 length(jump_i_S)
 
 
-w_tau_S = [jump_t_S[j+1] - jump_t_S[j] for j in 1:(length(jump_t_S) - 1)]
-w_tau_S = w_tau_S[w_tau_S .>= 0]
 begin  # compute WTD by the angle
-    w_tau_S_n = []
-    idx_no_stat = []
-    for i = 1:NMAX*(NMAX ÷ 2)
-        jumps = jump_t_S[jump_i_S .== i]
-        jumps_dist = [jumps[j+1] - jumps[j] 
-                    for j in 1:(length(jumps) - 1)]
-        jumps_dist = jumps_dist[jumps_dist .>= 0]
-        if isempty(jumps_dist)
-            append!(idx_no_stat, i)
-            print(i, " ")
-        end
-        push!(w_tau_S_n, jumps_dist)
+    w_tau_S = AtomicArraysStatistics.compute_w_tau(jump_S_t)
+
+    # Initialize arrays outside the loop for efficiency
+    w_tau_S_n = Vector{Vector{Float64}}()
+    idx_no_stat_S = Int[]
+
+
+    # Iterate through indices and jumps
+    for i in eachindex(D)
+        AtomicArraysStatistics.compute_w_tau_n(w_tau_S_n, idx_no_stat_S,
+                                               jump_t_S, jump_i_S, i)
     end
-    print("w_tau_S_n computed.\n")
+    println("w_tau_S_n computed.")
 end
 
 begin # angle distribution (note that N_BINS for StatsBase should be x2 
@@ -356,7 +366,7 @@ begin
     y_at = [pos[i][2] for i = 1:N]
     z_at = [pos[i][3] for i = 1:N]
 
-    GLMakie.activate!()
+    WGLMakie.activate!()
     fig, ax, pltobj = surface(X, Y, Z; shading = true, ambient = Vec3f(0.65, 0.65, 0.65),
         backlight = 1.0f0, color = sqrt.(X .^ 2 .+ Y .^ 2 .+ Z .^ 2),
         colormap = :viridis, transparency = true,
@@ -410,7 +420,7 @@ G2 = AtomicArraysStatistics.correlation_3op_1t(tau_0, ρ_ss, H, J, A, B, C;
 g2 = G2 / (n_ss_1 * n_ss_2)
 
 begin
-    const N_BINS = 500
+    N_BINS = 200
     fig_02, axs = plt.subplots(1, 1, sharey=true, tight_layout=true, figsize=(6,3))
     n, bins, patches = axs.hist(w_tau / w_tau_av, bins=N_BINS, density=true, histtype="bar", label=L"w(\tau / \bar{\tau})")
     axs.plot(bins[1:end-1], n)

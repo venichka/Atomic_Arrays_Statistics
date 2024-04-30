@@ -12,14 +12,17 @@ begin
     Pkg.activate(PATH_ENV)
 end
 
-using LinearAlgebra
-using QuantumOptics
-using PyPlot
-using GLMakie
-using AtomicArrays
-using Revise
+begin
+    using LinearAlgebra
+    using QuantumOptics
+    using PyPlot
+    using WGLMakie
+    using AtomicArrays
+    using Revise
 
-using AtomicArraysStatistics
+    using AtomicArraysStatistics
+end
+
 
 begin
     const EMField = field.EMField
@@ -27,7 +30,7 @@ begin
     const em_inc_function = AtomicArrays.field.plane
     const NMAX = 100
     const NMAX_T = 5
-    const DIRECTION = "L"
+    const DIRECTION = "R"
 
     const PATH_FIGS, PATH_DATA = AtomicArraysStatistics.path()
 end
@@ -44,7 +47,7 @@ end
 begin
     # System parameters
     const delt_0 = 1e-1
-    const a = (pi - delt_0) / (2*pi)#0.137
+    const a = 0.21#(pi - delt_0) / (2*pi)#0.137
     const γ = 1.
     const e_dipole = [1., 0, 0]
     const T = [0:0.05:500;]
@@ -52,7 +55,8 @@ begin
     const Ncenter = 1
 
     const pos = geometry.chain_dir(a, N; dir="z", pos_0=[0, 0, -a / 2])
-    const Delt = [(i < N) ? 0.0 : -γ*delt_0 for i = 1:N]
+    # const Delt = [(i < N) ? 0.0 : -γ*delt_0 for i = 1:N]
+    const Delt = [(i < N) ? -1.184/2 : 1.184/2 for i = 1:N]
     const S = SpinCollection(pos, e_dipole; gammas=γ, deltas=Delt)
 
     # Define Spin 1/2 operators
@@ -65,7 +69,7 @@ begin
     I_spin = identityoperator(spinbasis)
 
     # Incident field
-    E_ampl = 0.4 + 0im
+    E_ampl = 0.497 + 0im
     E_kvec = 2π
     E_w_0 = 0.5
     if (DIRECTION == "R")
@@ -126,9 +130,9 @@ begin
 
     # Dark and Bright states
     ψ_D = 1.0/sqrt(2.0) * (Ket(basis(H), [0,1,0,0]) - 
-                        sign(Γ[1,2])*Ket(basis(H), [0,0,1,0]))
+                           Ket(basis(H), [0,0,1,0]))
     ψ_B = 1.0/sqrt(2.0) * (Ket(basis(H), [0,1,0,0]) + 
-                        sign(Γ[1,2])*Ket(basis(H), [0,0,1,0]))
+                           Ket(basis(H), [0,0,1,0]))
 
     # eigen(dense(H).data)
     w, v = eigenstates(dense(H))
@@ -215,42 +219,60 @@ begin
     tau = [0:0.05:1000;]
     ρ_ss = QuantumOptics.steadystate.eigenvector(H, J; rates=Γ)  # finding the steady-state
 
-    corr_1 = QuantumOptics.timecorrelations.correlation(tau, ρ_ss, H, J,
-                                                        Jdagger[1], J[1]; rates=Γ)
-    corr_2 = QuantumOptics.timecorrelations.correlation(tau, ρ_ss, H, J,
-                                                        Jdagger[2], J[2]; rates=Γ)
-    corr_12 = QuantumOptics.timecorrelations.correlation(tau, ρ_ss, H, J,
-                                                        Jdagger[1] + Jdagger[2],
-                                                        J[1] + J[2]; rates=Γ)
-
-    corr_1 = corr_1 .- corr_1[end]
-    corr_2 = corr_2 .- corr_2[end]
-    corr_12 = corr_12 .- corr_12[end]
-
-    omega, spec_1 = QuantumOptics.timecorrelations.correlation2spectrum(tau, corr_1)
-    omega, spec_2 = QuantumOptics.timecorrelations.correlation2spectrum(tau, corr_2)
-    omega, spec_12 = QuantumOptics.timecorrelations.correlation2spectrum(tau, corr_12)
+    opers_collection = [J, J_s]
+    corr = zeros(ComplexF64, (length(opers_collection), length(J) + 1, length(tau)))
+    spec = zeros(Float64, (length(opers_collection), length(J) + 1, length(tau)))
+    omega = Vector{Float64}(undef, length(tau))
+    for (idx_1, opers) in enumerate(opers_collection)
+        Γ_comp = (idx_1 > 1) ? ones(N) : Γ
+        for (idx_2, O) in enumerate(opers)
+            corr[idx_1, idx_2, :] = QuantumOptics.timecorrelations.correlation(tau, 
+                        ρ_ss, H, opers, dagger(O), O; rates=Γ_comp)
+            corr[idx_1, idx_2, :] .-= corr[idx_1, idx_2, end]
+            omega, spec[idx_1, idx_2, :] = QuantumOptics.timecorrelations.correlation2spectrum(tau, corr[idx_1, idx_2, :])
+        end
+        corr[idx_1, end, :] = QuantumOptics.timecorrelations.correlation(tau, 
+                    ρ_ss, H, opers, dagger(sum(opers)), sum(opers); rates=Γ_comp)
+        corr[idx_1, end, :] .-= corr[idx_1, end, end]
+        omega, spec[idx_1, end, :] = QuantumOptics.timecorrelations.correlation2spectrum(tau, corr[idx_1, end, :])
+    end
 end
+
 # Plots
 let
-    fig_0 = PyPlot.figure(figsize=(6, 8))
-    PyPlot.subplot(211)
-    PyPlot.plot(tau, real(corr_1), label="atom 1")
-    PyPlot.plot(tau, real(corr_2), label="atom 2")
-    PyPlot.plot(tau, real(corr_12), label="atom 1-2")
-    PyPlot.xlabel(L"\tau")
-    PyPlot.ylabel(L"\langle \sigma^\dag_i \sigma_i \rangle")
-    PyPlot.legend()
+    fig_0, ax = PyPlot.subplots(2,2, figsize=(10, 8))
 
-    PyPlot.subplot(212)
-    PyPlot.plot(omega, spec_1, label="atom 1")
-    PyPlot.plot(omega, spec_2, label="atom 2")
-    PyPlot.plot(omega, spec_12, label="atom 1-2")
-    PyPlot.xlabel(L"\omega")
-    PyPlot.ylabel(L"\mathrm{Spectrum}")
-    PyPlot.xlim(-3,3)
-    PyPlot.legend()
+    ax[1,1].plot(tau, real(corr[1,1,:]), label="atom 1")
+    ax[1,1].plot(tau, real(corr[1,2,:]), label="atom 2")
+    ax[1,1].plot(tau, real(corr[1,3,:]), label="atom 1-2")
+    ax[1,1].set_xlim(0, 10 / γ)
+    ax[1,1].set_xlabel(L"\tau")
+    ax[1,1].set_ylabel(L"\langle \sigma^\dag_i \sigma_i \rangle")
+    ax[1,1].legend()
 
+    ax[2,1].plot(omega, spec[1,1,:], label="atom 1")
+    ax[2,1].plot(omega, spec[1,2,:], label="atom 2")
+    ax[2,1].plot(omega, spec[1,3,:], label="atom 1-2")
+    ax[2,1].set_xlabel(L"\omega")
+    ax[2,1].set_ylabel(L"\mathrm{Spectrum}")
+    ax[2,1].set_xlim(-3,3)
+    ax[2,1].legend()
+
+    ax[1,2].plot(tau, real(corr[2,1,:]), label="atom 1")
+    ax[1,2].plot(tau, real(corr[2,2,:]), label="atom 2")
+    ax[1,2].plot(tau, real(corr[2,3,:]), label="atom 1-2")
+    ax[1,2].set_xlim(0, 10 / γ)
+    ax[1,2].set_xlabel(L"\tau")
+    ax[1,2].set_ylabel(L"\langle J^\dag_i J_i \rangle")
+    ax[1,2].legend()
+
+    ax[2,2].plot(omega, spec[2,1,:], label="atom 1")
+    ax[2,2].plot(omega, spec[2,2,:], label="atom 2")
+    ax[2,2].plot(omega, spec[2,3,:], label="atom 1-2")
+    ax[2,2].set_xlabel(L"\omega")
+    ax[2,2].set_ylabel(L"\mathrm{Spectrum, }J")
+    ax[2,2].set_xlim(-3,3)
+    ax[2,2].legend()
     display(gcf())
 end
 
@@ -330,16 +352,6 @@ tr(ρ_ss_2 * ρ_D)
 tr(ρ_ss_1 * ρ_B)
 tr(ρ_ss_2 * ρ_B)
 
-[-0.0139431, -0.251986 - 0.253089*im, 0.149641 + 
-0.0687009 *im, 0.922668]
-[-0.0230892, -0.396428 - 0.346487*im, 0.179138 + 
-0.0822428*im, 0.841969]
-[-0.00709915, -0.131276 - 
-0.178245*im, 0.128485 + 0.058988 *im, 0.965504]
-ψ_per = Ket(basis(H), [-0.0230892, 0.179138 - 0.0822428*im, -0.396428 + 0.346487*im, 0.841969])
-ρ_per = ψ_per ⊗ dagger(ψ_per)
-tr(ρ_per * ρ_ss_1)
-g2_jump_opers(ρ_per, J_s) 
 
 Threads.@threads for kkii in CartesianIndices((2, NMAX))
     (kk, ii) = Tuple(kkii)[1], Tuple(kkii)[2]
@@ -356,7 +368,6 @@ function g2_analyt(theta, d, Omega21, Delta, Omega)
     (4 * Omega21^4(Delta * Omega * conj(Omega) - Omega21 * conj(Omega)^2 + Omega^2 * (-Omega21)) * (Delta * abs(Omega)^2 - Omega21 * (conj(Omega)^2 + Omega^2))) / (Delta^2 * ((Omega * Omega21 - Delta * conj(Omega)) * (Omega21 * conj(Omega) + Omega * Omega21 * exp(2 * im * pi * d * cos(theta)) - Delta * Omega) + Omega21 * conj(Omega) * (Omega * Omega21 + exp(-2 * im * pi * d * cos(theta)) * (Omega21 * conj(Omega) - Delta * Omega)) + (2 * (-Delta * Omega * conj(Omega) + Omega21 * conj(Omega)^2 + Omega^2 * Omega21)^2) / Delta^2)^2)
 end
 
-g2_analyt_data = [g2_analyt(i, 0.08, 0.507318, 1.63, 0.09087996823560401 + 0.04172327136617653*im) for i in phi_var]
 
 let
     fig_01, ax = plt.subplots(1, 1, subplot_kw=Dict("projection" => "polar"), figsize=(5,5))
@@ -421,7 +432,7 @@ let
     y_at = [pos[i][2] for i = 1:N]
     z_at = [pos[i][3] for i = 1:N]
 
-    GLMakie.activate!()
+    WGLMakie.activate!()
     fig, ax, pltobj = surface(X, Y, Z; shading = true, ambient = Vec3f(0.65, 0.65, 0.65),
         backlight = 1.0f0, color = sqrt.(X .^ 2 .+ Y .^ 2 .+ Z .^ 2),
         colormap = :viridis, transparency = true,
@@ -435,5 +446,5 @@ let
     colsize!(fig.layout, 1, Aspect(1, 1.0))
     fig
 
-    save((PATH_FIGS * "g2_N" * string(N) * "_" * "theta_phi_dark_" * DIRECTION * ".png"), fig) # here, you save your figure.
+    # save((PATH_FIGS * "g2_N" * string(N) * "_" * "theta_phi_dark_" * DIRECTION * ".png"), fig) # here, you save your figure.
 end

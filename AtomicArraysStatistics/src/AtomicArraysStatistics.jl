@@ -182,6 +182,28 @@ function jump_op_direct_detection(θ::Real, ϕ::Real, dΩ::Number, S::SpinCollec
     return S_op
 end
 
+
+function compute_w_tau(jump_t)
+    n = length(jump_t)
+    w_tau = Vector{Float64}(undef, n-1)
+    @inbounds for j in 1:(n-1)
+        w_tau[j] = jump_t[j+1] - jump_t[j]
+    end
+    return filter!(x -> x >= 0, w_tau)
+end
+
+function compute_w_tau_n(w_tau_n, idx_no_stat, jump_t, jump_i, i)
+    jumps = jump_t[jump_i .== i]
+    jumps_dist = diff(jumps)
+    jumps_dist = jumps_dist[jumps_dist .>= 0]
+    if isempty(jumps_dist)
+        push!(idx_no_stat, i)
+        print(i, " ")
+    end
+    push!(w_tau_n, jumps_dist)
+end
+
+
 """
     AtomicArraysStatistics.path()
 

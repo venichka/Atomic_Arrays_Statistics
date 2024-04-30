@@ -11,16 +11,18 @@ begin
     Pkg.activate(PATH_ENV)
 end
 
-using LinearAlgebra
-using Statistics, StatsBase
-using QuantumOptics
-using AtomicArrays
-using Revise
-using BenchmarkTools
-using ProgressMeter, Suppressor
-using HDF5, FileIO, Printf
+begin
+    using LinearAlgebra
+    using Statistics, StatsBase
+    using QuantumOptics
+    using AtomicArrays
+    using Revise
+    using BenchmarkTools
+    using ProgressMeter, Suppressor
+    using HDF5, FileIO, Printf
 
-using AtomicArraysStatistics
+    using AtomicArraysStatistics
+end
 
 
 function idx_2D_to_1D(i, j, nmax)
@@ -37,11 +39,11 @@ begin
     const EMField = field.EMField
     # const em_inc_function = AtomicArrays.field.gauss
     const em_inc_function = AtomicArrays.field.plane
-    const NMAX = 10
-    const N_traj = 10
-    const NMAX_T = 5
-    const N_BINS = 1000
-    const DIRECTION = "R"
+    NMAX = 10
+    N_traj = 10
+    NMAX_T = 5
+    N_BINS = 1000
+    DIRECTION = "R"
     tau_max = 5e5
 
     const PATH_FIGS, PATH_DATA = AtomicArraysStatistics.path()
@@ -52,7 +54,7 @@ begin
     const a = 0.21
     const γ = 1.0
     const e_dipole = [1.0, 0, 0]
-    const T = [0:0.05:500;]
+    const T = [0:0.05:500;] # for computing steady-states
     const N = 2
     const Ncenter = 1
 
@@ -120,13 +122,35 @@ begin
     theta = pi / 1.0
     psi0 = AtomicArrays.quantum.blochstate(phi, theta, N)
 
+    # steady-state
     tout, psi_t = timeevolution.mcwf(T, psi0, H, J_s)
     psi_ss = psi_t[end]
-    tout, psi_t, jump_t, jump_i = timeevolution.mcwf([0:500.0:5e5;], psi_ss, H, J_s; display_jumps=true, maxiters=1e15)
-    jump_t = convert(Array{Float32, 1}, jump_t)
-    println("J operators jumps computed")
-end
 
+    # jumps computation
+    T_wtau = [0:tau_max/100:tau_max;]
+    jump_t = Float64[]
+    jump_i = Int[]
+    lk = ReentrantLock()
+
+    function compute_jumps(T, psi_ss, H, J_s, jump_t, jump_i, progress)
+        _, _, jump_t_0, jump_i_0 = timeevolution.mcwf(T, psi_ss, H, J_s;
+                                                    display_jumps=true, maxiters=1e15)
+        lock(lk) do
+            append!(jump_t, jump_t_0)
+            append!(jump_i, jump_i_0)
+        end
+        next!(progress)
+    end
+
+    progress = Progress(N_traj)
+    Threads.@threads for _=1:N_traj
+        compute_jumps(T_wtau, psi_ss, H, J_s, jump_t, jump_i, progress)
+    end
+
+    finish!(progress)
+    println("J operators jumps computed")
+
+end
 
 "WTD for S(θ, ϕ) operators"
 
@@ -147,24 +171,17 @@ end
 
 # Time evolution
 begin
-    tau_max = 5e5
     T_wtau = [0:tau_max/100:tau_max;]
-    _, _, jump_t_S, jump_i_S = timeevolution.mcwf(T_wtau, psi_ss_S, H, D; 
-                                    display_jumps=true, maxiters=1e15);
+    jump_t_S = Float64[]
+    jump_i_S = Int[]
     lk = ReentrantLock()
+
     progress = Progress(N_traj)
-    Threads.@threads for i=1:N_traj
-        _, _, jump_t_S_0, jump_i_S_0 = timeevolution.mcwf(T_wtau, psi_ss_S, 
-                                H, D; display_jumps=true, maxiters=1e15);
-        lock(lk) do
-            append!(jump_t_S, jump_t_S_0)
-            append!(jump_i_S, jump_i_S_0)
-        end
-        next!(progress)
+    Threads.@threads for _=1:N_traj
+        compute_jumps(T_wtau, psi_ss_S, H, D, jump_t_S, jump_i_S, progress)
     end
     finish!(progress)
-    jump_t_S = convert(Array{Float32, 1}, jump_t_S)
-    println("S operator jumps computed")
+    println("S operators jumps computed")
 end;
 
 
