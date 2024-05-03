@@ -53,16 +53,16 @@ const PATH_FIGS, PATH_DATA = AtomicArraysStatistics.path()
 
 # System parameters
 begin
-    const a = 0.21
-    const γ = 1.0
-    const e_dipole = [1.0, 0, 0]
-    const T = [0:0.05:500;]
-    const N = 2
-    const Ncenter = 1
+    a = 0.21
+    γ = 1.0
+    e_dipole = [1.0, 0, 0]
+    T = [0:0.05:500;]
+    N = 2
+    Ncenter = 1
 
-    const pos = geometry.chain_dir(a, N; dir="z", pos_0=[0, 0, -a / 2])
-    const Delt = [(i < N) ? -1.184/2 : 1.184/2 for i = 1:N]
-    const S = SpinCollection(pos, e_dipole; gammas=γ, deltas=Delt)
+    pos = geometry.chain_dir(a, N; dir="z", pos_0=[0, 0, -a / 2])
+    Delt = [(i < N) ? -1.184/2 : 1.184/2 for i = 1:N]
+    S = SpinCollection(pos, e_dipole; gammas=γ, deltas=Delt)
 
     # Define Spin 1/2 operators
     spinbasis = SpinBasis(1 // 2)
@@ -273,7 +273,7 @@ length(jump_i_S)
 
 
 begin  # compute WTD by the angle
-    w_tau_S = AtomicArraysStatistics.compute_w_tau(jump_S_t)
+    w_tau_S = AtomicArraysStatistics.compute_w_tau(jump_t_S)
 
     # Initialize arrays outside the loop for efficiency
     w_tau_S_n = Vector{Vector{Float64}}()

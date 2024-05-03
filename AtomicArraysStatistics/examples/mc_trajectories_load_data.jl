@@ -59,7 +59,16 @@ begin
     NAME = "jumps"
     NMAX = 30
     DIRECTION = "R"
-    N_traj = 1000
+    N_traj = 2000
+
+    # system parameters
+    a = 0.21
+    γ = 1.0
+    e_dipole = [1.0, 0, 0]
+    T = [0:0.05:500;] # for computing steady-states
+    N = 2
+    Ncenter = 1
+    pos = geometry.chain_dir(a, N; dir="z", pos_0=[0, 0, -a / 2])
 end
 
 
@@ -83,7 +92,7 @@ end
 
 if NAME == "jumps"
 
-    N_BINS = 500
+    N_BINS = 5000
 
     d_angle = 2.0 / NMAX * pi 
 
@@ -92,10 +101,12 @@ if NAME == "jumps"
 
     length(jump_t_S)
     length(jump_i_S)
+end
 
 
+if NAME == "jumps"
     begin  # compute WTD by the angle
-        w_tau_S = AtomicArraysStatistics.compute_w_tau(jump_S_t)
+        w_tau_S = AtomicArraysStatistics.compute_w_tau(jump_t_S)
 
         # Initialize arrays outside the loop for efficiency
         w_tau_S_n = Vector{Vector{Float64}}()
@@ -103,13 +114,15 @@ if NAME == "jumps"
 
 
         # Iterate through indices and jumps
-        for i in eachindex(D)
+        for i = 1:NMAX*NMAX÷2
             AtomicArraysStatistics.compute_w_tau_n(w_tau_S_n, idx_no_stat_S,
                                                    jump_t_S, jump_i_S, i)
         end
         println("w_tau_S_n computed.")
     end
+end
 
+if NAME == "jumps"
     begin # angle distribution (note that N_BINS for StatsBase should be x2 
         # in comparison with Matplotlib)
         w_angle_0 = zeros(Float64, NMAX ÷ 2, NMAX)
@@ -125,7 +138,9 @@ if NAME == "jumps"
             print(i, "\n")
         end
     end
+end
 
+if NAME == "jumps"
 # plots
     let
         idx = NMAX*NMAX ÷ 2 ÷ 2
@@ -147,23 +162,6 @@ if NAME == "jumps"
         display(fig_03)
         # fig_03.savefig(PATH_FIGS * "wtau_g2_N" * string(N) * "_" * "jump_" * DIRECTION * ".pdf", dpi=300)
     end
-
-    # let
-    #     fig_04, axs = plt.subplots(1, 1, sharey=true, tight_layout=true, figsize=(6,6))
-    #     n, bins, patches = axs.hist(w_tau_S ./ mean(w_tau_S), bins=N_BINS, density=true, histtype="bar", label=L"w(\tau / \bar{\tau})")
-    #     for i = 1:NMAX * (NMAX ÷ 2)
-    #         axs.hist(w_tau_S_n[i] ./ mean(w_tau_S_n[i]), bins=N_BINS, density=true, alpha=0.1, histtype="bar")
-    #     end
-    #     axs.plot(bins[1:end-1], γ*exp.(-γ*bins[1:end-1]), color="red", label=L"\gamma \exp(-\gamma \tau / \bar{\tau})")
-    #     axs.set_xlim((0, 1))
-    #     # axs.set_ylim((0, 2))
-    #     # axs.set_yscale("log")
-    #     axs.set_xlabel(L"\tau / \bar{\tau}")
-    #     axs.set_ylabel(L"w(\tau / \bar{\tau}), g^{2}(\tau / \bar{\tau})")
-    #     axs.legend(loc="upper right")
-    #     display(fig_04)
-    #     # fig_03.savefig(PATH_FIGS * "wtau_g2_N" * string(N) * "_" * "jump_" * DIRECTION * ".pdf", dpi=300)
-    # end
 end
 
 begin
@@ -201,4 +199,20 @@ begin
     Colorbar(fig[1, 2], pltobj, height = Relative(0.5))
     colsize!(fig.layout, 1, Aspect(1, 1.0))
     fig
+end
+
+w_angle_0_L = w_angle_0[ceil(Int, (NMAX÷2)/2), :]
+w_angle_0_R = w_angle_0[ceil(Int, (NMAX÷2)/2), :]
+
+let
+    fig_01, ax = plt.subplots(1, 1, subplot_kw=Dict("projection" => "polar"), figsize=(5,5))
+    ax.plot(phi_var, w_angle_0_L, color="blue", linewidth=2, label="b")
+    ax.plot(phi_var, w_angle_0_R, color="red", linewidth=2, label="f")
+    ax.set_rlabel_position(-22.5)  # Move radial labels away from plotted line
+    ax.grid(true)
+    ax.set_title(L"WTD(0)", va="bottom")
+    ax.legend()
+    display(fig_01)
+
+    # fig_01.savefig(PATH_FIGS * "numPh_N" * string(N) * "_" * "phi_RL_bright" * ".pdf", dpi=300)
 end

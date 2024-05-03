@@ -28,9 +28,9 @@ begin
     const EMField = field.EMField
     # const em_inc_function = AtomicArrays.field.gauss
     const em_inc_function = AtomicArrays.field.plane
-    const NMAX = 100
-    const NMAX_T = 5
-    const DIRECTION = "R"
+    NMAX = 100
+    NMAX_T = 5
+    DIRECTION = "L"
 
     const PATH_FIGS, PATH_DATA = AtomicArraysStatistics.path()
 end
@@ -46,18 +46,18 @@ end
 
 begin
     # System parameters
-    const delt_0 = 1e-1
-    const a = 0.21#(pi - delt_0) / (2*pi)#0.137
-    const γ = 1.
-    const e_dipole = [1., 0, 0]
-    const T = [0:0.05:500;]
-    const N = 2
-    const Ncenter = 1
+    delt_0 = 1e-1
+    a = 0.21#(pi - delt_0) / (2*pi)#0.137
+    γ = 1.
+    e_dipole = [1., 0, 0]
+    T = [0:0.05:500;]
+    N = 2
+    Ncenter = 1
 
-    const pos = geometry.chain_dir(a, N; dir="z", pos_0=[0, 0, -a / 2])
-    # const Delt = [(i < N) ? 0.0 : -γ*delt_0 for i = 1:N]
-    const Delt = [(i < N) ? -1.184/2 : 1.184/2 for i = 1:N]
-    const S = SpinCollection(pos, e_dipole; gammas=γ, deltas=Delt)
+    pos = geometry.chain_dir(a, N; dir="z", pos_0=[0, 0, -a / 2])
+    # Delt = [(i < N) ? 0.0 : -γ*delt_0 for i = 1:N]
+    Delt = [(i < N) ? -1.184/2 : 1.184/2 for i = 1:N]
+    S = SpinCollection(pos, e_dipole; gammas=γ, deltas=Delt)
 
     # Define Spin 1/2 operators
     spinbasis = SpinBasis(1//2)

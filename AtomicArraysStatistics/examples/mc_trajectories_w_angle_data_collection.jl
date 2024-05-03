@@ -36,11 +36,11 @@ begin
     const EMField = field.EMField
     # const em_inc_function = AtomicArrays.field.gauss
     const em_inc_function = AtomicArrays.field.plane
-    const NMAX = 10
-    const N_traj = 10
-    const NMAX_T = 5
-    const N_BINS = 1000
-    const DIRECTION = "R"
+    NMAX = 10
+    N_traj = 10
+    NMAX_T = 5
+    N_BINS = 1000
+    DIRECTION = "R"
     tau_max = 5e5
 
     const PATH_FIGS, PATH_DATA = AtomicArraysStatistics.path()
@@ -48,16 +48,16 @@ end
 
 # System parameters
 begin
-    const a = 0.21
-    const γ = 1.0
-    const e_dipole = [1.0, 0, 0]
-    const T = [0:0.05:500;]
-    const N = 2
-    const Ncenter = 1
+    a = 0.21
+    γ = 1.0
+    e_dipole = [1.0, 0, 0]
+    T = [0:0.05:500;]
+    N = 2
+    Ncenter = 1
 
-    const pos = geometry.chain_dir(a, N; dir="z", pos_0=[0, 0, -a / 2])
-    const Delt = [(i < N) ? -1.184/2 : 1.184/2 for i = 1:N]
-    const S = SpinCollection(pos, e_dipole; gammas=γ, deltas=Delt)
+    pos = geometry.chain_dir(a, N; dir="z", pos_0=[0, 0, -a / 2])
+    Delt = [(i < N) ? -1.184/2 : 1.184/2 for i = 1:N]
+    S = SpinCollection(pos, e_dipole; gammas=γ, deltas=Delt)
 
     # Define Spin 1/2 operators
     spinbasis = SpinBasis(1 // 2)
@@ -155,7 +155,7 @@ begin
 end;
 
 begin  # compute WTD by the angle
-    w_tau_S = AtomicArraysStatistics.compute_w_tau(jump_S_t)
+    w_tau_S = AtomicArraysStatistics.compute_w_tau(jump_t_S)
 
     # Initialize arrays outside the loop for efficiency
     w_tau_S_n = Vector{Vector{Float64}}()
@@ -171,6 +171,7 @@ end
 
 begin # angle distribution (note that N_BINS for StatsBase should be x2 
       # in comparison with Matplotlib)
+    N_BINS = 1000
     w_angle_0 = zeros(Float64, NMAX ÷ 2, NMAX)
     for i = 1:NMAX*(NMAX ÷ 2)
         if isempty(w_tau_S_n[i])
@@ -194,7 +195,7 @@ begin
                      )
 
     time_str = @sprintf "%.0E" tau_max*N_traj
-    NAME_PART = string(N)*"atoms_tmax"*time_str*"_nmax"*string(NMAX)*"_"*DIRECTION*".h5"
+    NAME_PART = string(N)*"atoms_tmax"*time_str*"_nmax"*string(NMAX)*"_nbins"*N_BINS*"_"*DIRECTION*".h5"
     save(PATH_DATA*"w_angle_"*NAME_PART, data_dict)
 
     data_dict_loaded = load(PATH_DATA*"w_angle_"*NAME_PART)
