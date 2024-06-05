@@ -28,35 +28,41 @@ begin
     const EMField = field.EMField
     # const em_inc_function = AtomicArrays.field.gauss
     const em_inc_function = AtomicArrays.field.plane
-    NMAX = 100
+    NMAX = 200
     NMAX_T = 5
     DIRECTION = "L"
 
+    # load parameters from csv file
+    N = 2
     const PATH_FIGS, PATH_DATA = AtomicArraysStatistics.path()
-end
+    # Define the file path
+    csv_file = PATH_DATA*"experiment_results_N"*string(N)*".csv"
 
-function g2_jump_opers(rho_ss::Operator, J)
-    N = length(J)
-    num = real(sum([AtomicArraysStatistics.correlation_3op_1t(rho_ss, 
-    dagger(J[i]), dagger(J[j])*J[j], J[i]) for i = 1:N, j = 1:N]))
-    denom = real(sum([QuantumOptics.expect(dagger(J[i])*J[i], rho_ss) for i = 1:N]).^2)
-    return num / denom
+    param_state = "max_D"
+    param_geometry = "chain"
+    param_detuning_symmetry = true
+    param_direction = "L"
+    params = AtomicArraysStatistics.get_parameters_csv(csv_file, param_state,
+                                                       N, param_geometry,
+                                                       param_detuning_symmetry,
+                                                       param_direction)
+    println(params)
 end
-
 
 begin
     # System parameters
-    delt_0 = 1e-1
-    a = 0.21#(pi - delt_0) / (2*pi)#0.137
+    # delt_0 = 1e-1
+    a = params["a"]#0.21#(pi - delt_0) / (2*pi)#0.137
     γ = 1.
     e_dipole = [1., 0, 0]
     T = [0:0.05:500;]
-    N = 2
     Ncenter = 1
 
     pos = geometry.chain_dir(a, N; dir="z", pos_0=[0, 0, -a / 2])
     # Delt = [(i < N) ? 0.0 : -γ*delt_0 for i = 1:N]
-    Delt = [(i < N) ? -1.184/2 : 1.184/2 for i = 1:N]
+    # Delt = [(i < N) ? 0.0 : 0.94 for i = 1:N]
+    # Delt = [(i < N) ? -0.94/2 : 0.94/2 for i = 1:N]
+    Delt = params["Δ_vec"]
     S = SpinCollection(pos, e_dipole; gammas=γ, deltas=Delt)
 
     # Define Spin 1/2 operators
@@ -69,7 +75,7 @@ begin
     I_spin = identityoperator(spinbasis)
 
     # Incident field
-    E_ampl = 0.497 + 0im
+    E_ampl = params["E_0"] + 0im
     E_kvec = 2π
     E_w_0 = 0.5
     if (DIRECTION == "R")
@@ -149,8 +155,8 @@ end
 
 begin
     # Initial state (Bloch state)
-    const phi = 0.
-    const theta = pi/1.
+    phi = 0.
+    theta = pi/1.
 
     # Time evolution
 
@@ -324,14 +330,14 @@ begin
                                                     conj(Om_R[j]) * Jdagger[j]
                                                     for j = 1:N)
             H_1 = H
-            g2_j_1 = g2_jump_opers(ρ_ss_1, J_s)
+            g2_j_1 = AtomicArraysStatistics.g2_0_jump_opers(ρ_ss_1, J_s)
         elseif kk == 2
             ρ_ss_2 = QuantumOptics.steadystate.eigenvector(H, J; rates=Γ)
             H_eff_2 = AtomicArrays.quantum.Hamiltonian_eff(S) - sum(Om_R[j] * J[j] +
                                                     conj(Om_R[j]) * Jdagger[j]
                                                     for j = 1:N)
             H_2 = H
-            g2_j_2 = g2_jump_opers(ρ_ss_2, J_s)
+            g2_j_2 = AtomicArraysStatistics.g2_0_jump_opers(ρ_ss_2, J_s)
         end
     end
 
@@ -346,7 +352,7 @@ begin
     ρ_B = ψ_B ⊗ dagger(ψ_B)
 end
 
-g2_jump_opers(ρ_D_2, J_s) - g2_jump_opers(ρ_D_1, J_s) 
+AtomicArraysStatistics.g2_0_jump_opers(ρ_D_2, J_s) - AtomicArraysStatistics.g2_0_jump_opers(ρ_D_1, J_s) 
 tr(ρ_ss_1 * ρ_D)
 tr(ρ_ss_2 * ρ_D)
 tr(ρ_ss_1 * ρ_B)
@@ -383,7 +389,7 @@ let
     ax.legend()
     display(fig_01)
 
-    # fig_01.savefig(PATH_FIGS * "g2_N" * string(N) * "_" * "phi_RL_bright" * ".pdf", dpi=300)
+    # fig_01.savefig(PATH_FIGS * "g2_N" * string(N) * "_" * "phi_RL_bright" * "_asym_v1.1.pdf", dpi=300)
 end
 
 let
@@ -396,7 +402,7 @@ let
     ax.legend()
     display(fig_01)
 
-    # fig_01.savefig(PATH_FIGS * "numPh_N" * string(N) * "_" * "phi_RL_bright" * ".pdf", dpi=300)
+    # fig_01.savefig(PATH_FIGS * "numPh_N" * string(N) * "_" * "phi_RL_bright" * "_asym_v1.1.pdf", dpi=300)
 end
 
 "g2 depending on both angles"
@@ -408,7 +414,7 @@ Threads.@threads for iijj in CartesianIndices((NMAX ÷ 2, NMAX))
     θ = theta_var[ii]
     ϕ = phi_var[jj]
     D = AtomicArraysStatistics.jump_op_direct_detection(θ, ϕ, 0.02^2*pi^2, S, 2π, J)
-    g2 = AtomicArraysStatistics.coherence_function_g2(tau_0, H, J, D; rates=Γ, rho0=ρ_ss_2)
+    g2 = AtomicArraysStatistics.coherence_function_g2(tau_0, H, J, D; rates=Γ, rho0=ρ_ss_1)
     g2_result_2D[ii, jj] = real(g2[1])
     print(ii, "\n")
 end

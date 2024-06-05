@@ -25,6 +25,7 @@ begin
     using BenchmarkTools
     using ProgressMeter, Suppressor
     using HDF5, FileIO, Printf
+    using DataFrames, CSV
 
     using AtomicArraysStatistics
 end
@@ -37,31 +38,48 @@ function idx_1D_to_2D(i, nmax)
     return CartesianIndex((i - 1) ÷ nmax + 1, (i - 1) % nmax + 1)
 end
 
+
 begin
     const EMField = field.EMField
     # const em_inc_function = AtomicArrays.field.gauss
     const em_inc_function = AtomicArrays.field.plane
-    NMAX = 30
+    NMAX = 10
     N_traj = 100
     NMAX_T = 5
     N_BINS = 1000
-    DIRECTION = "L"
+    DIRECTION = "R"
     tau_max = 5e5
+
+    # load parameters from csv file
+    N = 2
+    const PATH_FIGS, PATH_DATA = AtomicArraysStatistics.path()
+    # Define the file path
+    csv_file = PATH_DATA*"experiment_results_N"*string(N)*".csv"
+
+    param_state = "max_D"
+    param_geometry = "chain"
+    param_detuning_symmetry = true
+    param_direction = "E"
+    params = AtomicArraysStatistics.get_parameters_csv(csv_file, param_state,
+                                                       N, param_geometry,
+                                                       param_detuning_symmetry,
+                                                       param_direction)
+    println(params)
 end
 
-const PATH_FIGS, PATH_DATA = AtomicArraysStatistics.path()
 
 # System parameters
 begin
-    a = 0.21
+    a = params["a"]
     γ = 1.0
     e_dipole = [1.0, 0, 0]
     T = [0:0.05:500;]
-    N = 2
     Ncenter = 1
 
     pos = geometry.chain_dir(a, N; dir="z", pos_0=[0, 0, -a / 2])
-    Delt = [(i < N) ? -1.184/2 : 1.184/2 for i = 1:N]
+    # Delt = [(i < N) ? 0.94/2 : -0.94/2 for i = 1:N]
+    # Delt = [(i < N) ? 0.0 : 0.94 for i = 1:N]
+    Delt = params["Δ_vec"]
     S = SpinCollection(pos, e_dipole; gammas=γ, deltas=Delt)
 
     # Define Spin 1/2 operators
@@ -74,7 +92,7 @@ begin
     I_spin = identityoperator(spinbasis)
 
     # Incident field
-    E_ampl = 0.497 + 0im
+    E_ampl = params["E_0"] + 0im
     E_kvec = 2π
     if (DIRECTION == "R")
         E_pos0 = [0.0, 0.0, 0.0]
@@ -165,7 +183,7 @@ begin
 
     # Time evolution
     psi0 = AtomicArrays.quantum.blochstate(phi, theta, N)
-    @suppress_err Threads.@threads for i=1:N_traj
+    Threads.@threads for i=1:N_traj
         timeevolution.mcwf(T, psi0, H, J_s; fout=fout)
     end
     sx_av ./= N_traj
@@ -305,7 +323,7 @@ begin # angle distribution (note that N_BINS for StatsBase should be x2
 end
 
 
-begin
+let
     idx = 25
     h = fit(Histogram, w_tau_S_n[idx] ./ mean(w_tau_S_n[idx]), nbins=N_BINS)
     h_0 = normalize(h, mode=:pdf)
@@ -316,35 +334,77 @@ begin
     axs.hist(w_tau_S_n[idx] ./ mean(w_tau_S_n[idx]), bins=N_BINS, density=true, alpha=0.5, histtype="bar", label=L"w_n(\tau / \bar{\tau})")
     axs.plot(bins[1:end-1], γ*exp.(-γ*bins[1:end-1]), color="red", label=L"\gamma \exp(-\gamma \tau / \bar{\tau})")
     axs.plot(h_0.edges[1][1:end-1], h_0.weights, color="blue")
-    axs.set_xlim((0, 5))
+    axs.set_xlim((0, 3))
     # axs.set_ylim((0, 2))
     # axs.set_yscale("log")
     axs.set_xlabel(L"\tau / \bar{\tau}")
     axs.set_ylabel(L"w(\tau / \bar{\tau}), g^{2}(\tau / \bar{\tau})")
     axs.legend(loc="upper right")
     display(fig_03)
-    # fig_03.savefig(PATH_FIGS * "wtau_g2_N" * string(N) * "_" * "jump_" * DIRECTION * ".pdf", dpi=300)
+    # fig_03.savefig(PATH_FIGS * "wtau_n_N" * string(N) * "_" * "jump_dark_" * DIRECTION * "_asym_v1.1.pdf", dpi=300)
 end
 
 for i=1:NMAX*NMAX ÷2
     print(length(w_tau_S_n[i]), "\n")
 end
 
-begin
+let
     fig_04, axs = plt.subplots(1, 1, sharey=true, tight_layout=true, figsize=(6,6))
     n, bins, patches = axs.hist(w_tau_S ./ mean(w_tau_S), bins=N_BINS, density=true, histtype="bar", label=L"w(\tau / \bar{\tau})")
     for i = 1:NMAX * (NMAX ÷ 2)
-        axs.hist(w_tau_S_n[i] ./ mean(w_tau_S_n[i]), bins=N_BINS, density=true, alpha=0.1, histtype="bar")
+        axs.hist(w_tau_S_n[i] ./ mean(w_tau_S_n[i]), bins=N_BINS, density=true, alpha=0.05, histtype="bar")
     end
     axs.plot(bins[1:end-1], γ*exp.(-γ*bins[1:end-1]), color="red", label=L"\gamma \exp(-\gamma \tau / \bar{\tau})")
-    axs.set_xlim((0, 1))
+    axs.set_xlim((0, 0.5))
     # axs.set_ylim((0, 2))
     # axs.set_yscale("log")
     axs.set_xlabel(L"\tau / \bar{\tau}")
     axs.set_ylabel(L"w(\tau / \bar{\tau}), g^{2}(\tau / \bar{\tau})")
     axs.legend(loc="upper right")
     display(fig_04)
-    # fig_03.savefig(PATH_FIGS * "wtau_g2_N" * string(N) * "_" * "jump_" * DIRECTION * ".pdf", dpi=300)
+    # fig_04.savefig(PATH_FIGS * "wtau_n_all_N" * string(N) * "_" * "jump_dark_" * DIRECTION * "_asym_v1.1.pdf", dpi=300)
+end
+
+let 
+    using StatsBase
+    # Number of angles
+    num_angles = NMAX * (NMAX ÷ 2)
+    N_BINS = 2000
+
+    # Create a 2D histogram (heatmap) for waiting times and angles
+    heatmap_data = zeros(N_BINS, num_angles)
+
+    normalized_data = w_tau_S_n ./ mean.(w_tau_S_n)
+    wtime_max = maximum([maximum(normalized_data[i]) for i in 1:num_angles])
+    for i in 1:num_angles
+        hist = fit(Histogram, normalized_data[i], range(0,wtime_max,N_BINS+1))
+        hist = normalize(hist, mode=:pdf)
+        heatmap_data[:, i] = hist.weights  # Normalize the histogram
+    end
+
+    # Define the x and y axis labels
+    x_labels = range(0,wtime_max,N_BINS)
+    y_labels = 1:num_angles
+
+    fig, ax = plt.subplots(figsize=(10, 8))
+
+    # Create the heatmap
+    cax = ax.imshow(heatmap_data', aspect="auto", origin="lower", extent=[x_labels[1], x_labels[end], y_labels[1], y_labels[end]], cmap="viridis")
+    ax.set_xlim((0, 1))
+
+    # Add color bar
+    cbar = fig.colorbar(cax)
+    cbar.set_label("Density")
+
+    # Set axis labels and title
+    ax.set_xlabel(L"\tau / \bar{\tau}")
+    ax.set_ylabel("Angle Index")
+    ax.set_title("Heatmap of Waiting Time Distributions across Angles")
+
+    # Display the plot
+    display(fig)
+    # Save the figure if needed
+    # fig.savefig(PATH_FIGS * "heatmap_wtau_" * string(N) * "_" * "jump_dark_" * DIRECTION * "_asym_v1.1.pdf", dpi=300)
 end
 
 begin
@@ -385,26 +445,9 @@ begin
 end
 
 
-"""Writing DATA"""
-
-
-# fig_1.savefig(PATH_FIGS*"obj4D_lattice_4x4_mf_nit10.png", dpi=300)
-
-data_dict_jumps_S = Dict("theta" => collect(theta_var), "phi" => collect(phi_var), 
-                     "jump_times" => jump_t_S, "jump_op_idx" => jump_i_S)
-
-time_str = @sprintf "%.0E" tau_max*N_traj
-NAME_PART = string(N)*"atoms_tmax"*time_str*"_nmax"*string(NMAX)*"_"*DIRECTION*".h5"
-save(PATH_DATA*"jumps_"*NAME_PART, data_dict_jumps_S)
-
-data_dict_loaded = load(PATH_DATA*"jumps_"*NAME_PART)
-data_dict_loaded["jump_times"] == data_dict_jumps_S["jump_times"]
-
-
-
 "g2 function"
 
-tau_0 = [0:0.5:1000;]
+tau_0 = [0:0.1:1000;]
 ρ_ss = QuantumOptics.steadystate.eigenvector(H, J; rates=Γ)  # finding the steady-state
 g2 = AtomicArraysStatistics.coherence_function_g2(tau_0, H, J_s, J_s[1] + J_s[2]; rho0=ρ_ss)
 g2_1 = AtomicArraysStatistics.coherence_function_g2(tau_0, H, J_s, J_s[1]; rho0=ρ_ss)
@@ -419,9 +462,11 @@ G2 = AtomicArraysStatistics.correlation_3op_1t(tau_0, ρ_ss, H, J, A, B, C;
                                                rates=Γ)
 g2 = G2 / (n_ss_1 * n_ss_2)
 
-begin
-    N_BINS = 200
-    fig_02, axs = plt.subplots(1, 1, sharey=true, tight_layout=true, figsize=(6,3))
+g2 = AtomicArraysStatistics.g2_tau_jump_opers(ρ_ss, J_s, H, tau_0)
+
+let
+    N_BINS = 2000
+    fig_02, axs = plt.subplots(1, 1, sharey=true, tight_layout=true, figsize=(6,6))
     n, bins, patches = axs.hist(w_tau / w_tau_av, bins=N_BINS, density=true, histtype="bar", label=L"w(\tau / \bar{\tau})")
     axs.plot(bins[1:end-1], n)
     axs.hist(w_tau_2 / w_tau_2_av, bins=N_BINS, alpha=0.3, density=true, histtype="bar", label=L"w_1(\tau / \bar{\tau})")
@@ -430,35 +475,51 @@ begin
     axs.plot(tau_0/w_tau_1_av, g2_1, color="blue", label=L"g^{(2)}_1(\tau / \bar{\tau})")
     axs.plot(tau_0/w_tau_2_av, g2_2, "--", color="blue", label=L"g^{(2)}_2(\tau / \bar{\tau})")
     axs.plot(tau_0/w_tau_av, g2, ":", color="blue", label=L"g^{(2)}(\tau / \bar{\tau})")
-    axs.set_xlim((0, 5))
-    axs.set_ylim((0, 1))
+    axs.set_xlim((0, 3))
+    axs.set_ylim((0, 2))
     axs.set_xlabel(L"\tau / \bar{\tau}")
     axs.set_ylabel(L"w(\tau / \bar{\tau}), g^{2}(\tau / \bar{\tau})")
     axs.legend(loc="upper right")
     display(fig_02)
-    # fig_02.savefig(PATH_FIGS * "wtau_g2_N" * string(N) * "_" * "jump_" * DIRECTION * ".pdf", dpi=300)
+    # fig_02.savefig(PATH_FIGS * "wtau_g2_N" * string(N) * "_" * "jump_dark_" * DIRECTION * "_asym_v1.1.pdf", dpi=300)
 end
 
 
+let
+    fig_01, ax = plt.subplots(3, 1, figsize=(6,9), constrained_layout = true)
+    for i = 1:N
+        ax[1].plot(T, sx_av[i, :], label="atom "*string(i))
+    end
+    ax[1].grid(true)
+    ax[1].set_ylabel(L"\sigma_x")
+    ax[1].legend()
+    for i = 1:N
+        ax[2].plot(T, sy_av[i, :], label="atom "*string(i))
+    end
+    ax[2].grid(true)
+    ax[2].set_ylabel(L"\sigma_y")
+    ax[2].legend()
+    for i = 1:N
+        ax[3].plot(T, sz_av[i, :], label="atom "*string(i))
+    end
+    ax[3].grid(true)
+    ax[3].set_ylabel(L"\sigma_z")
+    ax[3].legend()
+    ax[3].set_xlabel(L"t")
+    display(fig_01)
+end
 
-fig_01, ax = plt.subplots(3, 1, figsize=(6,9), constrained_layout = true)
-for i = 1:N
-    ax[1].plot(T, sx_av[i, :], label="atom "*string(i))
+
+"""Writing DATA"""
+
+let
+    data_dict_jumps_S = Dict("theta" => collect(theta_var), "phi" => collect(phi_var), 
+                        "jump_times" => jump_t_S, "jump_op_idx" => jump_i_S)
+
+    time_str = @sprintf "%.0E" tau_max*N_traj
+    NAME_PART = string(N)*"atoms_tmax"*time_str*"_nmax"*string(NMAX)*"_"*DIRECTION*".h5"
+    save(PATH_DATA*"jumps_"*NAME_PART, data_dict_jumps_S)
+
+    data_dict_loaded = load(PATH_DATA*"jumps_"*NAME_PART)
+    data_dict_loaded["jump_times"] == data_dict_jumps_S["jump_times"]
 end
-ax[1].grid(true)
-ax[1].set_ylabel(L"\sigma_x")
-ax[1].legend()
-for i = 1:N
-    ax[2].plot(T, sy_av[i, :], label="atom "*string(i))
-end
-ax[2].grid(true)
-ax[2].set_ylabel(L"\sigma_y")
-ax[2].legend()
-for i = 1:N
-    ax[3].plot(T, sz_av[i, :], label="atom "*string(i))
-end
-ax[3].grid(true)
-ax[3].set_ylabel(L"\sigma_z")
-ax[3].legend()
-ax[3].set_xlabel(L"t")
-display(fig_01)

@@ -43,20 +43,34 @@ begin
     DIRECTION = "R"
     tau_max = 5e5
 
+    # load parameters from csv file
+    N = 2
     const PATH_FIGS, PATH_DATA = AtomicArraysStatistics.path()
+    # Define the file path
+    csv_file = PATH_DATA*"experiment_results_N"*string(N)*".csv"
+
+    param_state = "max_D"
+    param_geometry = "chain"
+    param_detuning_symmetry = true
+    param_direction = "E"
+    params = AtomicArraysStatistics.get_parameters_csv(csv_file, param_state,
+                                                       N, param_geometry,
+                                                       param_detuning_symmetry,
+                                                       param_direction)
+    println(params)
 end
 
 # System parameters
 begin
-    a = 0.21
+    a = params["a"]
     γ = 1.0
     e_dipole = [1.0, 0, 0]
     T = [0:0.05:500;]
-    N = 2
     Ncenter = 1
 
     pos = geometry.chain_dir(a, N; dir="z", pos_0=[0, 0, -a / 2])
-    Delt = [(i < N) ? -1.184/2 : 1.184/2 for i = 1:N]
+    # Delt = [(i < N) ? -1.184/2 : 1.184/2 for i = 1:N]
+    Delt = params["Δ_vec"]
     S = SpinCollection(pos, e_dipole; gammas=γ, deltas=Delt)
 
     # Define Spin 1/2 operators
@@ -69,7 +83,7 @@ begin
     I_spin = identityoperator(spinbasis)
 
     # Incident field
-    E_ampl = 0.497 + 0im
+    E_ampl = params["E_0"] + 0im
     E_kvec = 2π
     if (DIRECTION == "R")
         E_pos0 = [0.0, 0.0, 0.0]

@@ -3,6 +3,7 @@ module AtomicArraysStatistics
 using LinearAlgebra
 using QuantumOptics
 using AtomicArrays
+using DataFrames, CSV
 
 """
     AtomicArraysStatistics.correlation_3op_1t([tspan, ]rho0, H, J, A, B, C; <keyword arguments>)
@@ -201,6 +202,48 @@ function compute_w_tau_n(w_tau_n, idx_no_stat, jump_t, jump_i, i)
         print(i, " ")
     end
     push!(w_tau_n, jumps_dist)
+end
+
+function g2_0_jump_opers(rho_ss::Operator, J_s)
+    N = length(J_s)
+    num = real(sum([AtomicArraysStatistics.correlation_3op_1t(rho_ss, 
+    dagger(J_s[i]), dagger(J_s[j])*J_s[j], J_s[i]) for i = 1:N, j = 1:N]))
+    denom = real(sum([QuantumOptics.expect(dagger(J_s[i])*J_s[i], rho_ss) for i = 1:N]).^2)
+    return num / denom
+end
+
+function g2_tau_jump_opers(rho_ss::Operator, J_s, H, tspan)
+    N = length(J_s)
+    num = real(sum([AtomicArraysStatistics.correlation_3op_1t(tspan, rho_ss, H, J_s, 
+    dagger(J_s[i]), dagger(J_s[j])*J_s[j], J_s[i]) for i = 1:N, j = 1:N]))
+    denom = real(sum([QuantumOptics.expect(dagger(J_s[i])*J_s[i], rho_ss) for i = 1:N]).^2)
+    return num ./ denom
+end
+
+# Function to retrieve parameters from the CSV file based on specified fields
+function get_parameters_csv(csv_file, state, N, geometry, detuning_symmetry, direction)
+    # Read the CSV file into a DataFrame
+    df = CSV.read(csv_file, DataFrame)
+
+    # Filter the DataFrame based on the specified fields
+    filtered_df = filter(row -> row.State == state && row.N == N && row.geometry == geometry &&
+                                row.detuning_symmetry == detuning_symmetry && row.Direction == direction, df)
+
+    # Check if any rows match the criteria
+    if nrow(filtered_df) == 0
+        println("No matching parameters found.")
+        return nothing
+    end
+
+    # Extract the desired parameters
+    a = filtered_df.a[1]
+    E₀ = filtered_df.E₀[1]
+    Δ_params = zeros(Float64, N)
+    for i in 1:N
+        Δ_params[i] = filtered_df[!, Symbol("Δ_$i")][1]
+    end
+
+    return Dict("a" => a, "E_0" => E₀, "Δ_vec" => Δ_params)
 end
 
 
