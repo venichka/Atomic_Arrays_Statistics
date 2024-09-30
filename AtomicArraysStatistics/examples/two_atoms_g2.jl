@@ -34,14 +34,20 @@ begin
 
     # load parameters from csv file
     N = 2
+    NON_HERMITIAN = false
     const PATH_FIGS, PATH_DATA = AtomicArraysStatistics.path()
     # Define the file path
-    csv_file = PATH_DATA*"experiment_results_N"*string(N)*".csv"
+    if NON_HERMITIAN
+        csv_file = PATH_DATA*"max_projection_params_N"*string(N)*"_nh.csv"
+    else
+        csv_file = PATH_DATA*"max_projection_params_N"*string(N)*".csv"
+    end
 
-    param_state = "max_D"
+    param_state = "|1,0>"  # use the |j,m>_{degeneracy} notation for Hermitian 
+                         # and |D/B> notation for non-Hermitian
     param_geometry = "chain"
     param_detuning_symmetry = true
-    param_direction = "L"
+    param_direction = "E"
     params = AtomicArraysStatistics.get_parameters_csv(csv_file, param_state,
                                                        N, param_geometry,
                                                        param_detuning_symmetry,
@@ -53,7 +59,7 @@ begin
     # System parameters
     # delt_0 = 1e-1
     a = params["a"]#0.21#(pi - delt_0) / (2*pi)#0.137
-    γ = 1.
+    γ = 0.1
     e_dipole = [1., 0, 0]
     T = [0:0.05:500;]
     Ncenter = 1
@@ -133,6 +139,8 @@ begin
                                                             for j = 1:N)
 
     H.data
+    # Non-Hermitian Hamiltonian
+    H_nh = H - 0.5im * sum(Γ[j,k] * Jdagger[j] * J[k] for j = 1:N, k = 1:N)
 
     # Dark and Bright states
     ψ_D = 1.0/sqrt(2.0) * (Ket(basis(H), [0,1,0,0]) - 
@@ -250,36 +258,38 @@ let
 
     ax[1,1].plot(tau, real(corr[1,1,:]), label="atom 1")
     ax[1,1].plot(tau, real(corr[1,2,:]), label="atom 2")
-    ax[1,1].plot(tau, real(corr[1,3,:]), label="atom 1-2")
+    # ax[1,1].plot(tau, real(corr[1,3,:]), label="atom 1-2")
     ax[1,1].set_xlim(0, 10 / γ)
-    ax[1,1].set_xlabel(L"\tau")
+    ax[1,1].set_xlabel(L"\gamma_0 \tau")
     ax[1,1].set_ylabel(L"\langle \sigma^\dag_i \sigma_i \rangle")
     ax[1,1].legend()
 
     ax[2,1].plot(omega, spec[1,1,:], label="atom 1")
     ax[2,1].plot(omega, spec[1,2,:], label="atom 2")
-    ax[2,1].plot(omega, spec[1,3,:], label="atom 1-2")
-    ax[2,1].set_xlabel(L"\omega")
-    ax[2,1].set_ylabel(L"\mathrm{Spectrum}")
-    ax[2,1].set_xlim(-3,3)
+    # ax[2,1].plot(omega, spec[1,3,:], label="atom 1-2")
+    ax[2,1].set_xlabel(L"\omega / \omega_0")
+    ax[2,1].set_ylabel(L"\mathrm{Spectrum} \;\; \mathrm{(arb. unit)}")
+    ax[2,1].set_xlim(-0.3,0.3)
     ax[2,1].legend()
 
     ax[1,2].plot(tau, real(corr[2,1,:]), label="atom 1")
     ax[1,2].plot(tau, real(corr[2,2,:]), label="atom 2")
-    ax[1,2].plot(tau, real(corr[2,3,:]), label="atom 1-2")
+    # ax[1,2].plot(tau, real(corr[2,3,:]), label="atom 1-2")
     ax[1,2].set_xlim(0, 10 / γ)
-    ax[1,2].set_xlabel(L"\tau")
+    ax[1,2].set_xlabel(L"\gamma_0 \tau")
     ax[1,2].set_ylabel(L"\langle J^\dag_i J_i \rangle")
     ax[1,2].legend()
 
     ax[2,2].plot(omega, spec[2,1,:], label="atom 1")
     ax[2,2].plot(omega, spec[2,2,:], label="atom 2")
-    ax[2,2].plot(omega, spec[2,3,:], label="atom 1-2")
-    ax[2,2].set_xlabel(L"\omega")
+    # ax[2,2].plot(omega, spec[2,3,:], label="atom 1-2")
+    ax[2,2].set_xlabel(L"\omega / \omega_0")
     ax[2,2].set_ylabel(L"\mathrm{Spectrum, }J")
-    ax[2,2].set_xlim(-3,3)
+    ax[2,2].set_xlim(-0.3,0.3)
     ax[2,2].legend()
     display(gcf())
+
+    # fig_0.savefig(PATH_FIGS * "spectra_N" * string(N) * "_" * "phi_" * DIRECTION * "_" * param_state * "_asym_H.pdf", dpi=300)
 end
 
 
@@ -379,17 +389,17 @@ let
     fig_01, ax = plt.subplots(1, 1, subplot_kw=Dict("projection" => "polar"), figsize=(5,5))
     ax.plot(phi_var, g2_result[1, :], color="red", linewidth=2, label="f")
     # ax.plot(phi_var, g2_result[1, :], color="blue", linewidth=2, label="exact")
-    ax.plot(phi_var, [g2_j_1 for i = 1:NMAX], color="black", label="f_jump")
+    # ax.plot(phi_var, [g2_j_1 for i = 1:NMAX], color="black", label="f_jump")
     ax.plot(phi_var, g2_result[2, :], color="blue", linewidth=2, label="b")
     # ax.plot(phi_var, 0.0045*real(g2_analyt_data), color="red", linewidth=2, label="approx")
-    ax.plot(phi_var, [g2_j_2 for i = 1:NMAX], "--", color="black", label="b_jump")
+    # ax.plot(phi_var, [g2_j_2 for i = 1:NMAX], "--", color="black", label="b_jump")
     ax.set_rlabel_position(-22.5)  # Move radial labels away from plotted line
     ax.grid(true)
     ax.set_title(L"g^{(2)}(0)", va="bottom")
     ax.legend()
     display(fig_01)
 
-    # fig_01.savefig(PATH_FIGS * "g2_N" * string(N) * "_" * "phi_RL_bright" * "_asym_v1.1.pdf", dpi=300)
+    # fig_01.savefig(PATH_FIGS * "g2_N" * string(N) * "_" * "phi_RL_" * param_state * "_asym_H.pdf", dpi=300)
 end
 
 let
@@ -402,7 +412,7 @@ let
     ax.legend()
     display(fig_01)
 
-    # fig_01.savefig(PATH_FIGS * "numPh_N" * string(N) * "_" * "phi_RL_bright" * "_asym_v1.1.pdf", dpi=300)
+    # fig_01.savefig(PATH_FIGS * "numPh_N" * string(N) * "_" * "phi_RL_" * param_state * "_asym_H.pdf", dpi=300)
 end
 
 "g2 depending on both angles"

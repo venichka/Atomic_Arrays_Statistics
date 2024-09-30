@@ -44,19 +44,25 @@ begin
     # const em_inc_function = AtomicArrays.field.gauss
     const em_inc_function = AtomicArrays.field.plane
     NMAX = 10
-    N_traj = 100
+    N_traj = 1000
     NMAX_T = 5
     N_BINS = 1000
-    DIRECTION = "R"
+    DIRECTION = "L"
     tau_max = 5e5
+    NON_HERMITIAN = false
 
     # load parameters from csv file
     N = 2
     const PATH_FIGS, PATH_DATA = AtomicArraysStatistics.path()
     # Define the file path
-    csv_file = PATH_DATA*"max_projection_params_N"*string(N)*".csv"
+    if NON_HERMITIAN
+        csv_file = PATH_DATA*"max_projection_params_N"*string(N)*"_nh.csv"
+    else
+        csv_file = PATH_DATA*"max_projection_params_N"*string(N)*".csv"
+    end
 
-    param_state = "|0,0>"  # use the |j,m>_{degeneracy} notation
+    param_state = "|0,0>"  # use the |j,m>_{degeneracy} notation and |B/D> for 
+                           # non-Hermitian
     param_geometry = "chain"
     param_detuning_symmetry = true
     param_direction = "E"
@@ -74,9 +80,11 @@ begin
     γ = 0.1
     e_dipole = [1.0, 0, 0]
     T = [0:0.05:500;]
-    Ncenter = 1
+    Ncenter = 2
 
-    pos = geometry.chain_dir(a, N; dir="z", pos_0=[0, 0, -a / 2])
+    pos = geometry.chain_dir(a, N; dir="z", pos_0=[0, 0, -(N - 1) * a / 2])
+    # Delt = [(i < N) ? 0.94/2 : -0.94/2 for i = 1:N]
+    # Delt = [(i < N) ? 0.0 : 0.94 for i = 1:N]
     Delt = params["Δ_vec"]
     S = SpinCollection(pos, e_dipole; gammas=γ, deltas=Delt)
 
@@ -148,6 +156,8 @@ begin
                                                 conj(Om_R[j]) * Jdagger[j]
                                                 for j = 1:N)
     H.data
+    # Non-Hermitian Hamiltonian
+    H_nh = H - 0.5im * sum(Γ[j,k] * Jdagger[j] * J[k] for j = 1:N, k = 1:N)
 
     # eigen(dense(H).data)
     w, v = eigenstates(dense(H))
@@ -155,6 +165,7 @@ begin
     # Jump operators description
     J_s = AtomicArraysStatistics.jump_op_source_mode(Γ, J)
     # d, D_op = diagonaljumps(Γ, J)
+    print("Jump operators computed")
 end
 
 "Dynamics"
@@ -187,6 +198,7 @@ begin
     sx_av ./= N_traj
     sy_av ./= N_traj
     sz_av ./= N_traj
+    print("averages computed")
 end
 
 "Waiting time distributions and g2 functions"
@@ -383,6 +395,8 @@ let
     # Define the x and y axis labels
     x_labels = range(0,wtime_max,N_BINS)
     y_labels = 1:num_angles
+    y_ticks = [(string(round(phi_var[(i-1) % NMAX + 1]/pi, digits=2))*"π", string(round(theta_var[(i-1) ÷ NMAX + 1]/pi, digits=2))*"π") 
+               for i = 1:NMAX*(NMAX ÷ 2)]
 
     fig, ax = plt.subplots(figsize=(10, 8))
 
@@ -392,11 +406,13 @@ let
 
     # Add color bar
     cbar = fig.colorbar(cax)
-    cbar.set_label("Density")
+    cbar.set_label(L"w(\tau / \bar{\tau}, \varphi, \theta)")
 
     # Set axis labels and title
+    ax.set_yticks(y_labels[1:NMAX*(NMAX ÷ 2) ÷ 8:NMAX*(NMAX ÷ 2)], 
+                  labels=y_ticks[1:NMAX*(NMAX ÷ 2) ÷ 8:NMAX*(NMAX ÷ 2)])
     ax.set_xlabel(L"\tau / \bar{\tau}")
-    ax.set_ylabel("Angle Index")
+    ax.set_ylabel(L"(\varphi, \theta)")
     ax.set_title("Heatmap of Waiting Time Distributions across Angles")
 
     # Display the plot

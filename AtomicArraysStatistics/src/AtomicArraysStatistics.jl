@@ -6,6 +6,32 @@ using AtomicArrays
 using DataFrames, CSV
 
 """
+    AtomicArraysStatistics.comm(A, B)
+Computes the commututator of two operators: A and B
+"""
+function comm(A::Operator, B::Operator)
+    return A * B - B * A
+end
+function comm(A::Matrix, B::Matrix)
+    return A * B - B * A
+end
+
+"""
+    AtomicArraysStatistics.anticomm(A, B)
+Computes the anticommututator of two operators: A and B
+"""
+function anticomm(A::Operator, B::Operator)
+    return A * B + B * A
+end
+function anticomm(A::Matrix, B::Matrix)
+    return A * B + B * A
+end
+
+function gamma_detuned(gamma::Real, delt::Real; omega::Real=2*pi)
+    return gamma*(1.0 + 3.0*delt/omega + 3.0*delt^2/omega^3 + delt^3/omega^3)
+end
+
+"""
     AtomicArraysStatistics.correlation_3op_1t([tspan, ]rho0, H, J, A, B, C; <keyword arguments>)
 Calculate one time correlation values ``⟨A(0)B(\\tau)C(0)⟩``.
 The calculation is done by multiplying the initial density operator
@@ -111,11 +137,195 @@ Calculate the source-mode jump operators
 # Return
 * `J_s`: vector of the source-mode jump operators
 """
-function jump_op_source_mode(Γ, J)
-    N = rank(Γ)
+function jump_op_source_mode(Γ, J; tol=1e-10)
+    N = length(J)
     λ_g, β_g = eigen(Γ)
+    λ_g[abs.(λ_g) .< tol] .= 0.0
     J_s = [sqrt.(λ_g[l]) * β_g[l,:]' * J for l = 1:N]
     return J_s
+end
+
+"""
+    AtomicArraysStatistics.collective_ops_all(J::Vector)
+Computes collective oprators given the individual jump operators of atoms, J.
+# Arguments
+* `J`: vector of jump operators
+
+# Return
+* [`J_z`, `J_z_sum`, `J_sum`, `J2`]
+"""
+function collective_ops_all(J::Vector)
+    J_z = 0.5 * [comm(dagger(j), j) for j in J]
+    J_z_sum = sum(J_z)
+    J_sum = sum(J)
+    J2 = 0.5 * (anticomm(dagger(J_sum), J_sum)) + J_z_sum^2
+    return J_z, J_z_sum, J_sum, J2
+end
+
+"""
+    AtomicArraysStatistics.dicke_state(N::Int, j::Number, m::Number, J::Vector{Operator})
+
+Dicke state in uncoupled basis.
+# Arguments
+* `j` = N / 2
+* `m` ∈ [-j, j]
+* `J` is vector of collapse operators
+
+# Return
+* `|j,m>`
+"""
+function dicke_state(N::Int, j::Number, m::Number, J::Vector)
+    norm_coef = sqrt(factorial(Int(j+m)) / (factorial(N)*factorial(Int(j-m))))
+    e_state = AtomicArrays.quantum.blochstate(0.0, 0.0, N)
+    return norm_coef * (sum(J))^Int(j - m) * e_state
+end
+
+"""
+    AtomicArraysStatistics.spherical_basis_jm_4(J::Vector; γ::Real=1.0)
+Calculates the basis vectors of the total momentum operator ``|j, m\rangle``
+for a system of 4 two-level atoms.
+    TODO: write a general function for arb N using Clebsch-Gordan coefficients
+
+# Arguments
+* `J::Vector` -- vector of individual jump operators of atoms
+
+# Return
+* `|j,m>` -- vector of vectors |2,m> (m = -2,...,2), |1,m> (m = -1,0,1), |0,0>, note that |1,m> are threefold degenerate, |0,0> is twofold degenerate
+"""
+function spherical_basis_jm_4(J::Vector; γ::Real = 1.0)
+    N = length(J)
+    Γ = γ * ones(N, N)
+    _, J_s = diagonaljumps(Γ, J)
+    G = Ket(basis(J[1]), [(i < 2^N) ? 0 : 1 for i in 1:2^N])
+    ψ_1m1_2, ψ_1m1_1, ψ_1m1_3, ψ_2m1 = [dagger(j) * G for j in J_s]
+    ψ_00_1 = 1/sqrt(2) * dagger(sum(J) - 2*J[end]) * ψ_1m1_1
+    ψ_00_2 = 1/sqrt(2) * dagger(sum(J) - 2*J[end]) * ψ_1m1_2
+    Jsd = dagger(sum(J))
+    return [[G, ψ_2m1, Jsd * ψ_2m1/sqrt(6), Jsd^2 * ψ_2m1/6, Jsd^3 * ψ_2m1/12],
+           [[ψ_1m1_1, ψ_1m1_2, ψ_1m1_3],
+            [Jsd*ψ_1m1_1, Jsd*ψ_1m1_2, Jsd*ψ_1m1_3] ./ sqrt(2), 
+            [Jsd^2*ψ_1m1_1, Jsd^2*ψ_1m1_2, Jsd^2*ψ_1m1_3] ./ 2], 
+           [[ψ_00_1, ψ_00_2]]]
+end
+
+# TODO: change these functions accordingly for spherical_basis_jm_N function
+function find_state_index(states::Vector{Vector}, j::Int, m::Int;
+                          degeneracy::Union{Int, Nothing}=nothing)
+    # Determine min and max j from the states input
+    max_j = length(states) - 1  # max_j is determined by the length of states
+    min_j = 0  # min_j is assumed to be 0 based on the structure
+    
+    # Create j_map dynamically based on max_j
+    j_map = Dict(max_j => 1)
+    for i in 1:max_j
+        j_map[max_j - i] = i + 1
+    end
+    
+    # Ensure j is within the valid range
+    if j < min_j || j > max_j
+        error("Invalid j value. Valid range is $min_j to $max_j.")
+    end
+    
+    # Ensure m is within the valid range of -j to +j
+    if m < -j || m > j
+        error("Invalid m value. For j = $j, valid range is -$j to +$j.")
+    end
+
+    # Map j to the correct index in `states`
+    j_idx = j_map[j]
+
+    # Now map m to the correct sublist in the selected j vector
+    m_idx = j + 1 + m  # for example, m = -j will be 1, m = -j+1 will be 2, and so on
+
+    # Retrieve the specific |j,m> state(s)
+    state_group = states[j_idx][m_idx]
+
+    # Determine degeneracy based on the structure
+    if isa(state_group, Vector)
+        num_degenerate = length(state_group)
+        if isnothing(degeneracy)
+            return j_idx, m_idx  # Return the whole set of degenerate states
+        elseif degeneracy > num_degenerate || degeneracy < 1
+            error("Invalid degeneracy index. Available indices: 1 to $num_degenerate.")
+        else
+            return j_idx, m_idx, degeneracy
+        end
+    else
+        # No degeneracy, return the single state
+        return j_idx, m_idx
+    end
+end
+
+function find_flattened_state_index(states::Vector{Vector}, j::Int, m::Int;
+                                    degeneracy::Union{Int, Nothing}=nothing)
+    # Determine min and max j from the states input
+    max_j = length(states) - 1  # max_j is determined by the length of states
+    min_j = 0  # min_j is assumed to be 0 based on the structure
+    
+    # Create j_map dynamically based on max_j
+    j_map = Dict(max_j => 1)
+    for i in 1:max_j
+        j_map[max_j - i] = i + 1
+    end
+    
+    # Ensure j is within the valid range
+    if j < min_j || j > max_j
+        error("Invalid j value. Valid range is $min_j to $max_j.")
+    end
+    
+    # Ensure m is within the valid range of -j to +j
+    if m < -j || m > j
+        error("Invalid m value. For j = $j, valid range is -$j to +$j.")
+    end
+    
+    # Map j to the correct index in `states`
+    j_idx = j_map[j]
+
+    # Now map m to the correct sublist in the selected j vector
+    m_idx = j + 1 + m  # for example, m = -j will be 1, m = -j+1 will be 2, and so on
+
+    # Retrieve the specific |j,m> state(s)
+    state_group = states[j_idx][m_idx]
+
+    # Flatten the states vector
+    flattened_states = vcat(vcat(states...)...)
+
+    # Determine degeneracy based on the structure and find the correct index
+    if isa(state_group, Vector)
+        num_degenerate = length(state_group)
+        if isnothing(degeneracy)
+            return findall(x -> x in state_group, flattened_states)  # Return all indices for the degenerate states
+        elseif degeneracy > num_degenerate || degeneracy < 1
+            error("Invalid degeneracy index. Available indices: 1 to $num_degenerate.")
+        else
+            specific_state = state_group[degeneracy]
+            return findfirst(x -> x == specific_state, flattened_states)  # Return the index of the specific state
+        end
+    else
+        # No degeneracy, return the index of the single state
+        return findfirst(x -> x == state_group, flattened_states)
+    end
+end
+# Function when degeneracy is provided (index_jm = (j, m, d))
+function find_flattened_state_index(states::Vector{Vector}, index_jm::Tuple{Int, Int, Int})
+    j, m, d = index_jm
+    return find_flattened_state_index(states, j, m; degeneracy=d)
+end
+# Function when degeneracy is not provided (index_jm = (j, m))
+function find_flattened_state_index(states::Vector{Vector}, index_jm::Tuple{Int, Int})
+    j, m = index_jm
+    return find_flattened_state_index(states, j, m)
+end
+
+# Function that takes a tuple (j, m, d) and returns "|j,m>_d"
+function state_string(index_jm::Tuple{Int, Int, Int})
+    j, m, d = index_jm
+    return "|$j,$m>$d"
+end
+# Function that takes a tuple (j, m) and returns "|j,m>"
+function state_string(index_jm::Tuple{Int, Int})
+    j, m = index_jm
+    return "|$j,$m>"
 end
 
 
@@ -226,7 +436,7 @@ function get_parameters_csv(csv_file, state, N, geometry, detuning_symmetry, dir
     df = CSV.read(csv_file, DataFrame)
 
     # Filter the DataFrame based on the specified fields
-    filtered_df = filter(row -> row.State == state && row.N == N && row.geometry == geometry &&
+    filtered_df = filter(row -> row.State_proj_max == state && row.N == N && row.geometry == geometry &&
                                 row.detuning_symmetry == detuning_symmetry && row.Direction == direction, df)
 
     # Check if any rows match the criteria
