@@ -467,8 +467,8 @@ end
 function path()
     home = homedir()
     if home == "C:\\Users\\nnefedkin"
-        PATH_FIGS = "D:/nnefedkin/Google_Drive/Work/In process/Projects/Collective_effects_QMS/Figures/two_arrays/forward_scattering/"
-        PATH_DATA = "D:/nnefedkin/Google_Drive/Work/In process/Projects/Collective_effects_QMS/Data/data_2arrays_mpc_mf/"
+        PATH_FIGS = "D:/nnefedkin/Google_Drive/Work/In process/Projects/Statistics_QMS/Figs/"
+        PATH_DATA = "D:/nnefedkin/Google_Drive/Work/In process/Projects/Statistics_QMS/Data/"
     elseif home == "/home/nikita"
         PATH_FIGS = "/home/nikita/Documents/Work/Projects/two_arrays/statistics/Figs/"
         PATH_DATA = "/home/nikita/Documents/Work/Projects/two_arrays/statistics/Data/"
