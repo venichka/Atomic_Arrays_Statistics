@@ -141,7 +141,7 @@ function jump_op_source_mode(Γ, J; tol=1e-10)
     N = length(J)
     λ_g, β_g = eigen(Γ)
     λ_g[abs.(λ_g) .< tol] .= 0.0
-    J_s = [sqrt.(λ_g[l]) * β_g[l,:]' * J for l = 1:N]
+    J_s = [sqrt.(λ_g[l]) * β_g[:,l]' * J for l = 1:N]
     return J_s
 end
 

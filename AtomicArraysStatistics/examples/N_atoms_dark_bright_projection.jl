@@ -53,13 +53,14 @@ begin
 
     # System parameters
     γ = 0.1
-    e_dipole = [1., 0, 0]
+    # e_dipole = [1.0, 1.3, 0.9im]
+    e_dipole = [1.0, 0.0, 0.0im]
     T = [0:0.05:500;]
-    N = 2
+    N = 4
     Ncenter = Int(ceil(N / 2))
-    DETUNING_SYMMETRY = true
+    DETUNING_SYMMETRY = false
     GEOMETRY = "chain"
-    NON_HERMITIAN = true
+    NON_HERMITIAN = false
 
     if NON_HERMITIAN
         i_states = ["|B>", "|D>"]
@@ -84,6 +85,7 @@ begin
     d_list = range(2e-1, 10e-1, NMAX);
 
     projections = zeros(2, length(i_states), NMAX, NMAX, NMAX);
+    total_scattering = zeros(2, NMAX, NMAX, NMAX);
 
     # debug
     w_list = []
@@ -112,17 +114,17 @@ for kkiijjmm in CartesianIndices((2, NMAX, NMAX, NMAX))
         Delt = detuning_generator_nonsym_1atom(N, Delt_0)
     end
     gammas_array = [AtomicArraysStatistics.gamma_detuned(γ, delt) for delt in Delt]
-    S = SpinCollection(pos, [e_dipole for i in 1:N], gammas_array; deltas=Delt)
+    S = SpinCollection(pos, [(i == 1) ? e_dipole : e_dipole for i in 1:N], gammas_array; deltas=Delt)
 
     # Incident field
     E_kvec = 2π
     if (DIRECTION == "R")
         E_pos0 = [0.0,0.0,0.0]
-        E_polar = [1.0, 0im, 0.0]
+        E_polar = [1.0, 0im, 0.0im]
         E_angle = [0.0, 0.0]  # {θ, φ}
     elseif (DIRECTION == "L")
         E_pos0 = [0.0,0.0,0.0*a]
-        E_polar = [-1.0, 0im, 0.0]
+        E_polar = [-1.0, 0im, 0.0im]
         E_angle = [π, 0.0]  # {θ, φ}
     else
         println("DIRECTION wasn't specified")
@@ -199,6 +201,13 @@ for kkiijjmm in CartesianIndices((2, NMAX, NMAX, NMAX))
             projections[kk, 2, ii, jj, mm] = real(tr(ρ_ss * ρ_D))
         end
     end
+
+    # Objective function -- forward scattering
+    sigmas_av = [expect(sigma, ρ_ss) for sigma in J]
+    r_lim = 1000.0
+    forward_scatt = AtomicArrays.field.forward_scattering(r_lim, E_inc,
+                                                          S, sigmas_av)
+    total_scattering[kk, ii, jj, mm] = forward_scatt
     next!(progress)
 end
 
@@ -206,8 +215,12 @@ maximum(projections[1, 2, ..])
 
 maximum(projections[1, 1, ..])
 
+maximum(total_scattering[1, ..])
+maximum(total_scattering[2, ..])
+
 begin
     eff = AtomicArrays.field.objective(projections[1,..], projections[2,..]);
+    eff_scat = AtomicArrays.field.objective(total_scattering[1,..], total_scattering[2,..]);
     (maximum(eff[2,..]), argmax(eff[2,..]), (Delt_list[argmax(eff[2,..])[1]], E_list[argmax(eff[2,..])[2]], d_list[argmax(eff[2,..])[3]]))
 end
 
@@ -251,6 +264,8 @@ begin
     i_D = 2
     idx_D = argmax(eff[i_D,..])
     idx_B = argmax(eff[i_B,..])
+
+    idx_sc = argmax(eff_scat)
 end
 let
     idxD = idx_D[2]
@@ -330,6 +345,58 @@ let
     fig
 end
 
+
+let
+    idx = idx_sc[2]
+
+    x = Delt_list
+    y = d_list
+    c_1 = total_scattering[1, :, idx, :]
+    c_2 = total_scattering[2, :, idx, :]
+    cmap = "viridis"
+
+    id_max_R = argmax(total_scattering[1, :, idx, :])
+    id_max_L = argmax(total_scattering[2, :, idx, :])
+
+    fig, ax = plt.subplots(1, 2, figsize=(8,3), constrained_layout=true)
+    im1 = ax[1].pcolormesh(x, y, c_1', cmap=cmap)
+    ax[1].scatter([x[id_max_R[1]]], [y[id_max_R[2]]], c="r")
+    ax[1].set_title(L"\sigma_{tot},\;R")
+    ax[1].set_xlabel(L"\Delta")
+    ax[1].set_ylabel(L"a")
+    # ax[1].set_ylim(0.42,0.46)
+    fig.colorbar(im1, ax=ax[1])
+    im2 = ax[2].pcolormesh(x, y, c_2', cmap=cmap)
+    ax[2].scatter([x[id_max_L[1]]], [y[id_max_L[2]]], c="b")
+    ax[2].set_title(L"\sigma_{tot},\;L")
+    ax[2].set_xlabel(L"\Delta")
+    fig.colorbar(im2, ax=ax[2])
+    fig
+end
+
+let
+    idx = idx_sc[2]
+    x = Delt_list
+    y = d_list
+    c_1 = eff_scat[:, idx, :]
+    cmap = "viridis"
+
+    id_max = argmax(eff_scat[:, idx, :])
+
+    fig, ax = plt.subplots(1, 1, figsize=(4.5,3))
+    im1 = ax.pcolormesh(x, y, c_1', cmap=cmap, 
+                        # vmin=0, vmax=0.2
+                        )
+    ax.scatter([x[id_max[1]]], [y[id_max[2]]], c="r")
+    ax.set_title("Contrast for total scattering")
+    ax.set_xlabel(L"\Delta")
+    ax.set_ylabel(L"a")
+    fig.colorbar(im1, ax=ax)
+
+    fig
+end
+
+
 minimum(abs.(imag(w_list))/γ*2)
 w_list_all[1,:,idx_B]
 
@@ -376,20 +443,30 @@ end
 directions = ["R", "L", "E"]
 if NON_HERMITIAN
     states = i_states
+    # push!(states, "tot_sc") # it exists in hermitian case
 else
     states = AtomicArraysStatistics.state_string.(i_states)
+    push!(states, "tot_sc")
 end
 # TODO: this should be generalized
 
 for (i, st) in enumerate(states)
-    arr_Dir = projections[:,i,..]
-    arr_eff = eff[i,..]
+    if st != "tot_sc"
+        arr_Dir = projections[:,i,..]
+        arr_eff = eff[i,..]
+    else
+        arr_eff = eff_scat
+    end
     for (j, dir) in enumerate(directions)
-        if dir == "R"
+        if st == "tot_sc" && dir == "E"
+            idx = argmax(arr_eff)
+        elseif st == "tot_sc" && dir != "E"
+            continue
+        elseif st != "tot_sc" && dir == "R"
             idx = argmax(arr_Dir[1, ..])
-        elseif dir == "L"
+        elseif st != "tot_sc" && dir == "L"
             idx = argmax(arr_Dir[2, ..])
-        elseif dir == "E"
+        elseif st != "tot_sc" && dir == "E"
             idx = argmax(arr_eff)
         end
 
@@ -402,7 +479,7 @@ for (i, st) in enumerate(states)
                        )
         # Iteratively add "proj_"*state to the dictionary
         projection_keys = String[]
-        for (id, state) in enumerate(states)
+        for (id, state) in ((NON_HERMITIAN) ? enumerate(states) : enumerate(states[1:end-1]))
             key = "proj_" * state
             push!(projection_keys, key * "_L")
             push!(projection_keys, key * "_R")

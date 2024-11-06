@@ -52,7 +52,7 @@ begin
     NON_HERMITIAN = false
 
     # load parameters from csv file
-    N = 2
+    N = 4
     const PATH_FIGS, PATH_DATA = AtomicArraysStatistics.path()
     # Define the file path
     if NON_HERMITIAN
@@ -61,10 +61,10 @@ begin
         csv_file = PATH_DATA*"max_projection_params_N"*string(N)*".csv"
     end
 
-    param_state = "|0,0>"  # use the |j,m>_{degeneracy} notation and |B/D> for 
+    param_state = "tot_sc"  # use the |j,m>_{degeneracy} notation and |B/D> for 
                            # non-Hermitian
     param_geometry = "chain"
-    param_detuning_symmetry = true
+    param_detuning_symmetry = false
     param_direction = "E"
     params = AtomicArraysStatistics.get_parameters_csv(csv_file, param_state,
                                                        N, param_geometry,
@@ -164,6 +164,7 @@ begin
 
     # Jump operators description
     J_s = AtomicArraysStatistics.jump_op_source_mode(Γ, J)
+    Γ_diag, _ = eigen(Γ)
     # d, D_op = diagonaljumps(Γ, J)
     print("Jump operators computed")
 end
@@ -441,7 +442,8 @@ begin
     z_at = [pos[i][3] for i = 1:N]
 
     WGLMakie.activate!()
-    fig, ax, pltobj = surface(X, Y, Z; shading = true, ambient = Vec3f(0.65, 0.65, 0.65),
+    fig, ax, pltobj = surface(X, Y, Z; shading = true, 
+    # ambient = Vec3f(0.65, 0.65, 0.65),
         backlight = 1.0f0, color = sqrt.(X .^ 2 .+ Y .^ 2 .+ Z .^ 2),
         colormap = :viridis, transparency = true,
         figure = (; resolution = (1200, 800), fontsize = 22),
@@ -461,41 +463,163 @@ end
 
 "g2 function"
 
-tau_0 = [0:0.1:1000;]
+tau_0 = [0:0.1:10000;]
 ρ_ss = QuantumOptics.steadystate.eigenvector(H, J; rates=Γ)  # finding the steady-state
-g2 = AtomicArraysStatistics.coherence_function_g2(tau_0, H, J_s, J_s[1] + J_s[2]; rho0=ρ_ss)
-g2_1 = AtomicArraysStatistics.coherence_function_g2(tau_0, H, J_s, J_s[1]; rho0=ρ_ss)
-g2_2 = AtomicArraysStatistics.coherence_function_g2(tau_0, H, J_s, J_s[2]; rho0=ρ_ss)
+Ψ₀ = AtomicArrays.quantum.blochstate(0, pi, N)
+ρ₀ = Ψ₀ ⊗ dagger(Ψ₀)
+tt, ρ_t = QuantumOptics.timeevolution.master_h(T, ρ₀, H, J; rates=Γ)
+g2_sum = AtomicArraysStatistics.coherence_function_g2(tau_0, H, J_s, sum(J_s); rho0=ρ_ss)
+g2_n = zeros(ComplexF64, N, length(tau_0))
+for i = 1:N
+    g2_n[i,:] = AtomicArraysStatistics.coherence_function_g2(tau_0, H, J_s, J_s[i]; rho0=ρ_ss)
+end
 
-A = dagger(J_s[2])
-B = dagger(J_s[1]) * J_s[1]
-C = J_s[2]
-n_ss_1 = QuantumOptics.expect(B, ρ_ss)
-n_ss_2 = QuantumOptics.expect(A*C, ρ_ss)
-G2 = AtomicArraysStatistics.correlation_3op_1t(tau_0, ρ_ss, H, J, A, B, C;
-                                               rates=Γ)
-g2 = G2 / (n_ss_1 * n_ss_2)
+maximum(abs.((ρ_ss - ρ_t[end]).data))
+# A = dagger(J_s[2])
+# B = dagger(J_s[1]) * J_s[1]
+# C = J_s[2]
+# n_ss_1 = QuantumOptics.expect(B, ρ_ss)
+# n_ss_2 = QuantumOptics.expect(A*C, ρ_ss)
+# G2 = AtomicArraysStatistics.correlation_3op_1t(tau_0, ρ_ss, H, J, A, B, C;
+#                                                rates=Γ)
+# g2 = G2 / (n_ss_1 * n_ss_2)
 
 g2 = AtomicArraysStatistics.g2_tau_jump_opers(ρ_ss, J_s, H, tau_0)
 
+let 
+    using CairoMakie
+    CairoMakie.activate!()
+
+    N_BINS = 10000
+    n_states = length(w_tau_n)  # Assuming w_tau_n and g2_n are arrays
+    color_cycle = ["blue", "green", "orange", "purple", "brown"]  # Modify colors if needed
+    off_val = 2.5
+    x_lims = (-0.1, 3)
+    y_lims = (-0.3, (N+1)*2+3)
+
+    f = Makie.Figure(; size=(400,600))
+    ax = Axis(f[1, 1]; 
+              limits=(x_lims, y_lims),
+              yticks = (vcat([[0,1,2] .+ off_val*(i-1) for  i=1:N+1]...), 
+                        vcat([["0","1","2"] for  i=1:N+1]...)),
+              xlabel=L"\tau / \bar{\tau}",
+              ylabel=L"w(\tau / \bar{\tau}), \; g^{(2)}(\tau / \bar{\tau})",
+              xlabelsize=24,
+              ylabelsize=24,
+              xticklabelsize=20,
+              yticklabelsize=20,
+              xgridvisible=false,
+              )
+
+    # density!(w_tau / w_tau_av, 
+    #          direction = :x, npoints = N_BINS,
+    #          color=(color_cycle[1], 0.3),
+    #         )
+    hist!(w_tau / w_tau_av, 
+          normalization=:pdf,
+          bins = N_BINS,
+          color=(color_cycle[1], 0.3),
+         )
+    lines!(tau_0 / w_tau_av, g2,
+           color=color_cycle[1],
+          )
+    lines!(tau_0 / w_tau_av, map(x -> exp(-x), tau_0 / w_tau_av), 
+           linestyle=:dot,
+           color=:black,
+          )
+    text!(x_lims[2]*0.85, 1.5, text=L"\Sigma \hat{J}_j",
+          align=(:center, :center),
+          color=color_cycle[1],
+          fontsize=20,
+         )
+    for i in 1:n_states
+        w_tau_i = w_tau_n[i]
+        w_tau_i_av = mean(w_tau_i)
+        g2_i = real(g2_n[i, :])
+        # density!(w_tau_i / w_tau_i_av, offset=2*i,
+        #          direction = :x, npoints = N_BINS,
+        #          color=(color_cycle[i+1], 0.3),
+        #         )
+        hist!(w_tau_i / w_tau_i_av, offset=off_val*i,
+              normalization=:pdf,
+              bins = N_BINS,
+              color=(color_cycle[i+1], 0.3),
+             )
+        lines!(tau_0 / w_tau_i_av, g2_i .+ off_val*i,
+               color=color_cycle[i+1],
+              )
+        lines!(range(0,10,50), map(x -> exp(-x) + off_val*i, range(0,10,50)), 
+               linestyle=:dot,
+               color=:black,
+              )
+        text!(x_lims[2]*0.85, 1.5 + off_val*i, text=L"\hat{J}_%$i",
+              align=(:center, :center),
+              color=color_cycle[i+1],
+              fontsize=20,
+             )
+        if N == 4 && i==1 
+            x_vals = range(0.1,3,5)
+            lines!(x_vals, map(x -> 1, x_vals) .+ off_val*i,
+                   color=color_cycle[i+1],
+                  )
+        end
+
+    end
+    # save((PATH_FIGS * "wtau_g2_N" * string(N) * "_" * "jump_sc_" * DIRECTION * "_asym.pdf"), f) # here, you save your figure.
+
+    f
+end
+
 let
-    N_BINS = 2000
+    N_BINS = 1000
     fig_02, axs = plt.subplots(1, 1, sharey=true, tight_layout=true, figsize=(6,6))
+    
+    # Generalized for w_tau_n and g2_n
+    n_states = length(w_tau_n)  # Assuming w_tau_n and g2_n are arrays
+    color_cycle = ["green", "orange", "purple", "brown"]  # Modify colors if needed
+
+    # Plot the general histogram for w_tau_n / w_tau_av
     n, bins, patches = axs.hist(w_tau / w_tau_av, bins=N_BINS, density=true, histtype="bar", label=L"w(\tau / \bar{\tau})")
     axs.plot(bins[1:end-1], n)
-    axs.hist(w_tau_2 / w_tau_2_av, bins=N_BINS, alpha=0.3, density=true, histtype="bar", label=L"w_1(\tau / \bar{\tau})")
-    axs.hist(w_tau_1 / w_tau_1_av, bins=N_BINS, alpha=0.3, density=true, histtype="bar", label=L"w_2(\tau / \bar{\tau})")
+    
+    # Loop through the states to plot w_tau_n[i] and g2_n[i]
+    for i in 1:n_states
+        w_tau_i = w_tau_n[i]
+        w_tau_i_av = mean(w_tau_i)
+        g2_i = g2_n[i, :]
+
+        # Plot w_tau_n[i] / w_tau_n[i]_av as a histogram
+        axs.hist(w_tau_i / w_tau_i_av, bins=N_BINS, alpha=0.6 - 0.1*(i-1), 
+                 density=true, histtype="bar", 
+                 color=color_cycle[i],
+                 label=L"w_%$(i)(\tau / \bar{\tau})")
+        
+        # Plot g2_n[i]
+        axs.plot(tau_0 / w_tau_i_av, g2_i, 
+                 linestyle=((i == 1) ? "-" : "--"),
+                 color=color_cycle[i],
+                 label=L"g^{(2)}_{%$i}(\tau / \bar{\tau})"
+                )
+    end
+
+    # Plot the exponential reference curve
     axs.plot(bins[1:end-1], exp.(-bins[1:end-1]), color="red", label=L"\gamma \exp(-\gamma \tau / \bar{\tau})")
-    axs.plot(tau_0/w_tau_1_av, g2_1, color="blue", label=L"g^{(2)}_1(\tau / \bar{\tau})")
-    axs.plot(tau_0/w_tau_2_av, g2_2, "--", color="blue", label=L"g^{(2)}_2(\tau / \bar{\tau})")
-    axs.plot(tau_0/w_tau_av, g2, ":", color="blue", label=L"g^{(2)}(\tau / \bar{\tau})")
+
+    axs.plot(range(0,3,100), exp.(-range(0,3,100)), color="black", label=L"\gamma \exp(-\gamma \tau / \bar{\tau})")
+
+    # Plot the general g2 curve
+    axs.plot(tau_0 / w_tau_av, g2, ":", color="blue", label=L"g^{(2)}(\tau / \bar{\tau})")
+
+    # Set plot limits, labels, and legend
     axs.set_xlim((0, 3))
     axs.set_ylim((0, 2))
     axs.set_xlabel(L"\tau / \bar{\tau}")
     axs.set_ylabel(L"w(\tau / \bar{\tau}), g^{2}(\tau / \bar{\tau})")
     axs.legend(loc="upper right")
+
+    # Display and optionally save the figure
     display(fig_02)
-    # fig_02.savefig(PATH_FIGS * "wtau_g2_N" * string(N) * "_" * "jump_dark_" * DIRECTION * "_asym_v1.1.pdf", dpi=300)
+    # fig_02.savefig(PATH_FIGS * "wtau_g2_N" * string(N) * "_" * "jump_sc_" * DIRECTION * "_asym.pdf", dpi=300)
 end
 
 
@@ -504,6 +628,7 @@ let
     for i = 1:N
         ax[1].plot(T, sx_av[i, :], label="atom "*string(i))
     end
+    ax[1].plot(tt, [real(expect(embed(sx, 1), ρ_t[i])) for i in eachindex(tt)])
     ax[1].grid(true)
     ax[1].set_ylabel(L"\sigma_x")
     ax[1].legend()
@@ -523,6 +648,7 @@ let
     display(fig_01)
 end
 
+var(Γ_diag ./ γ)
 
 """Writing DATA"""
 

@@ -16,7 +16,8 @@ begin
     using LinearAlgebra
     using QuantumOptics
     using PyPlot
-    using WGLMakie
+    using GLMakie
+    using ProgressMeter
     using AtomicArrays
     using Revise
 
@@ -30,10 +31,10 @@ begin
     const em_inc_function = AtomicArrays.field.plane
     NMAX = 200
     NMAX_T = 5
-    DIRECTION = "L"
+    DIRECTION = "R"
 
     # load parameters from csv file
-    N = 2
+    N = 4
     NON_HERMITIAN = false
     const PATH_FIGS, PATH_DATA = AtomicArraysStatistics.path()
     # Define the file path
@@ -43,7 +44,7 @@ begin
         csv_file = PATH_DATA*"max_projection_params_N"*string(N)*".csv"
     end
 
-    param_state = "|1,0>"  # use the |j,m>_{degeneracy} notation for Hermitian 
+    param_state = "tot_sc"  # use the |j,m>_{degeneracy} notation for Hermitian
                          # and |D/B> notation for non-Hermitian
     param_geometry = "chain"
     param_detuning_symmetry = true
@@ -64,7 +65,7 @@ begin
     T = [0:0.05:500;]
     Ncenter = 1
 
-    pos = geometry.chain_dir(a, N; dir="z", pos_0=[0, 0, -a / 2])
+    pos = geometry.chain_dir(a, N; dir="z", pos_0=[0, 0, - (N - 1) * a / 2])
     # Delt = [(i < N) ? 0.0 : -γ*delt_0 for i = 1:N]
     # Delt = [(i < N) ? 0.0 : 0.94 for i = 1:N]
     # Delt = [(i < N) ? -0.94/2 : 0.94/2 for i = 1:N]
@@ -133,6 +134,7 @@ begin
 
     Γ, J = AtomicArrays.quantum.JumpOperators(S)
     Jdagger = [dagger(j) for j = J]
+    spsm = [Jdagger[i] * J[j] for i = 1:N, j = 1:N]
     Ω = AtomicArrays.interaction.OmegaMatrix(S)
     H = AtomicArrays.quantum.Hamiltonian(S) - sum(Om_R[j] * J[j] +
                                                             conj(Om_R[j]) * Jdagger[j]
@@ -142,11 +144,20 @@ begin
     # Non-Hermitian Hamiltonian
     H_nh = H - 0.5im * sum(Γ[j,k] * Jdagger[j] * J[k] for j = 1:N, k = 1:N)
 
+    # Liouvillian
+    L = liouvillian(H, J; rates=Γ)
+
     # Dark and Bright states
-    ψ_D = 1.0/sqrt(2.0) * (Ket(basis(H), [0,1,0,0]) - 
-                           Ket(basis(H), [0,0,1,0]))
-    ψ_B = 1.0/sqrt(2.0) * (Ket(basis(H), [0,1,0,0]) + 
-                           Ket(basis(H), [0,0,1,0]))
+    if N == 2
+        ψ_D = 1.0/sqrt(2.0) * (Ket(basis(H), [0,1,0,0]) - 
+                            Ket(basis(H), [0,0,1,0]))
+        ψ_B = 1.0/sqrt(2.0) * (Ket(basis(H), [0,1,0,0]) + 
+                            Ket(basis(H), [0,0,1,0]))
+    else
+        # TODO: fix this for many atoms
+        ψ_D = AtomicArrays.quantum.blochstate(0,pi,N)
+        ψ_B = AtomicArrays.quantum.blochstate(0,0,N)
+    end
 
     # eigen(dense(H).data)
     w, v = eigenstates(dense(H))
@@ -230,7 +241,7 @@ end
 "Correlation function of the 1st order"
 
 begin
-    tau = [0:0.05:1000;]
+    tau = [0:0.05:2000;]
     ρ_ss = QuantumOptics.steadystate.eigenvector(H, J; rates=Γ)  # finding the steady-state
 
     opers_collection = [J, J_s]
@@ -254,42 +265,70 @@ end
 
 # Plots
 let
-    fig_0, ax = PyPlot.subplots(2,2, figsize=(10, 8))
+    eig_vals_H, _ = eigen(dense(H).data)
+    eig_vals_L, _ = eigen(dense(L).data)
 
-    ax[1,1].plot(tau, real(corr[1,1,:]), label="atom 1")
-    ax[1,1].plot(tau, real(corr[1,2,:]), label="atom 2")
-    # ax[1,1].plot(tau, real(corr[1,3,:]), label="atom 1-2")
-    ax[1,1].set_xlim(0, 10 / γ)
+    fig_0, ax = PyPlot.subplots(2,2, figsize=(10, 8), constrained_layout=true)
+
+    for i in 1:N
+        ax[1,1].plot(tau, real(corr[1,i,:]), label="atom $i")
+    end
+    ax[1,1].plot(tau, real(corr[1,end,:]), label="all atoms")
+    ax[1,1].set_xlim(-20, 100 / γ)
     ax[1,1].set_xlabel(L"\gamma_0 \tau")
     ax[1,1].set_ylabel(L"\langle \sigma^\dag_i \sigma_i \rangle")
     ax[1,1].legend()
 
-    ax[2,1].plot(omega, spec[1,1,:], label="atom 1")
-    ax[2,1].plot(omega, spec[1,2,:], label="atom 2")
-    # ax[2,1].plot(omega, spec[1,3,:], label="atom 1-2")
+    for i in 1:N
+        ax[2,1].plot(omega, 10*spec[1,i,:]/maximum(spec[1,i,:]), label="atom $i")
+    end
+    # ax[2,1].plot(eig_vals_H, 0.3*ones(length(eig_vals_H)), 
+    #              "o", color="black", 
+    #              ms=1.5,
+    #             )
+    # ax[2,1].plot(imag(eig_vals_L), 0.15*ones(length(eig_vals_L)), 
+    #              "o", color="blue", 
+    #              ms=1.5,
+    #             )
+    ax[2,1].hist(imag(eig_vals_L), bins=60, density=true, histtype="bar", alpha=0.6)
+    ax[2,1].hist(eig_vals_H, bins=10, density=true, histtype="bar", alpha=0.3)
+    ax[2,1].plot(omega, 10*spec[1,end,:]/maximum(spec[1,end,:]), label="all atoms")
     ax[2,1].set_xlabel(L"\omega / \omega_0")
     ax[2,1].set_ylabel(L"\mathrm{Spectrum} \;\; \mathrm{(arb. unit)}")
     ax[2,1].set_xlim(-0.3,0.3)
+    # ax[2,1].set_yscale("log")
     ax[2,1].legend()
 
-    ax[1,2].plot(tau, real(corr[2,1,:]), label="atom 1")
-    ax[1,2].plot(tau, real(corr[2,2,:]), label="atom 2")
-    # ax[1,2].plot(tau, real(corr[2,3,:]), label="atom 1-2")
-    ax[1,2].set_xlim(0, 10 / γ)
+    for i = 1:N
+        ax[1,2].plot(tau, real(corr[2,i,:]), label=L"J_%$i")
+    end
+    ax[1,2].plot(tau, real(corr[2,end,:]), label=L"\Sigma J_j")
+    ax[1,2].set_xlim(-20, 100 / γ)
     ax[1,2].set_xlabel(L"\gamma_0 \tau")
     ax[1,2].set_ylabel(L"\langle J^\dag_i J_i \rangle")
     ax[1,2].legend()
 
-    ax[2,2].plot(omega, spec[2,1,:], label="atom 1")
-    ax[2,2].plot(omega, spec[2,2,:], label="atom 2")
-    # ax[2,2].plot(omega, spec[2,3,:], label="atom 1-2")
+    for i in 1:N
+        ax[2,2].plot(omega, 10*spec[2,i,:]/maximum(spec[2,i,:]), label=L"J_%$i")
+    end
+    # ax[2,2].plot(eig_vals_H, 0.3*ones(length(eig_vals_H)), 
+    #              "o", color="black", 
+    #              ms=1.5,
+    #             )
+    # ax[2,2].plot(imag(eig_vals_L), 0.15*ones(length(eig_vals_L)), 
+    #              "o", color="blue", 
+    #              ms=1.5,
+    #             )
+    ax[2,2].hist(imag(eig_vals_L), bins=60, density=true, histtype="bar", alpha=0.6)
+    ax[2,2].hist(eig_vals_H, bins=10, density=true, histtype="bar", alpha=0.3)
+    ax[2,2].plot(omega, 10*spec[2,end,:] / maximum(spec[2,end,:]), label=L"\Sigma J_j")
     ax[2,2].set_xlabel(L"\omega / \omega_0")
     ax[2,2].set_ylabel(L"\mathrm{Spectrum, }J")
     ax[2,2].set_xlim(-0.3,0.3)
     ax[2,2].legend()
     display(gcf())
 
-    # fig_0.savefig(PATH_FIGS * "spectra_N" * string(N) * "_" * "phi_" * DIRECTION * "_" * param_state * "_asym_H.pdf", dpi=300)
+    # fig_0.savefig(PATH_FIGS * "spectra_N" * string(N) * "_" * "phi_" * DIRECTION * "_" * param_state * "_sym_H.pdf", dpi=300)
 end
 
 
@@ -307,6 +346,8 @@ begin
     # Steady-state for both directions
     ρ_ss_1 = ρ_ss
     ρ_ss_2 = ρ_ss
+    L_1 = L
+    L_2 = L
     H_eff_1 = H
     H_eff_2 = H
     H_1 = H
@@ -367,6 +408,10 @@ tr(ρ_ss_1 * ρ_D)
 tr(ρ_ss_2 * ρ_D)
 tr(ρ_ss_1 * ρ_B)
 tr(ρ_ss_2 * ρ_B)
+tr(dagger(ρ_B) * (L_1 * ρ_B))
+tr(dagger(ρ_D) * (L_1 * ρ_D))
+tr(dagger(ρ_B) * (L_2 * ρ_B))
+tr(dagger(ρ_D) * (L_2 * ρ_D))
 
 
 Threads.@threads for kkii in CartesianIndices((2, NMAX))
@@ -399,7 +444,7 @@ let
     ax.legend()
     display(fig_01)
 
-    # fig_01.savefig(PATH_FIGS * "g2_N" * string(N) * "_" * "phi_RL_" * param_state * "_asym_H.pdf", dpi=300)
+    # fig_01.savefig(PATH_FIGS * "g2_N" * string(N) * "_" * "phi_RL_" * param_state * "_sym_H_sc.pdf", dpi=300)
 end
 
 let
@@ -417,17 +462,25 @@ end
 
 "g2 depending on both angles"
 
-g2_result_2D = zeros((NMAX ÷ 2, NMAX))
-
-Threads.@threads for iijj in CartesianIndices((NMAX ÷ 2, NMAX))
-    (ii, jj) = Tuple(iijj)[1], Tuple(iijj)[2]
-    θ = theta_var[ii]
-    ϕ = phi_var[jj]
-    D = AtomicArraysStatistics.jump_op_direct_detection(θ, ϕ, 0.02^2*pi^2, S, 2π, J)
-    g2 = AtomicArraysStatistics.coherence_function_g2(tau_0, H, J, D; rates=Γ, rho0=ρ_ss_1)
-    g2_result_2D[ii, jj] = real(g2[1])
-    print(ii, "\n")
+begin
+    g2_result_2D = zeros((NMAX ÷ 2, NMAX))
+    n_result_2D = zeros((NMAX ÷ 2, NMAX))
+    lk = ReentrantLock()
+    progress = Progress((NMAX ÷ 2) * NMAX)
+    Threads.@threads for iijj in CartesianIndices((NMAX ÷ 2, NMAX))
+        (ii, jj) = Tuple(iijj)[1], Tuple(iijj)[2]
+        rho = ρ_ss_2
+        θ = theta_var[ii]
+        ϕ = phi_var[jj]
+        D = AtomicArraysStatistics.jump_op_direct_detection(θ, ϕ, 0.02^2*pi^2, S, 2π, J)
+        # g2 = AtomicArraysStatistics.coherence_function_g2(tau_0, H, J, D; rates=Γ, rho0=rho)
+        # g2_result_2D[ii, jj] = real(g2[1])
+        n_result_2D[ii, jj] = real(QuantumOptics.expect(dagger(D)*D, rho))
+        next!(progress)
+    end
+    finish!(progress)
 end
+
 # Plots
 let
     lθ = length(theta_var);
@@ -439,28 +492,142 @@ let
 
     for ii=1:lθ
         for jj=1:lϕ
-            X[ii,jj]= g2_result_2D[ii,jj]*cos(phi_var[jj])*sin(theta_var[ii]);
-            Y[ii,jj]= g2_result_2D[ii,jj]*sin(phi_var[jj])*sin(theta_var[ii]);
-            Z[ii,jj]= g2_result_2D[ii,jj]*cos(theta_var[ii]);
+            X[ii,jj]= 10^5*n_result_2D[ii,jj]*cos(phi_var[jj])*sin(theta_var[ii]) / a;
+            Y[ii,jj]= 10^5*n_result_2D[ii,jj]*sin(phi_var[jj])*sin(theta_var[ii]) / a;
+            Z[ii,jj]= 10^5*n_result_2D[ii,jj]*cos(theta_var[ii]) / a;
+            # X[ii,jj]= g2_result_2D[ii,jj]*cos(phi_var[jj])*sin(theta_var[ii]);
+            # Y[ii,jj]= g2_result_2D[ii,jj]*sin(phi_var[jj])*sin(theta_var[ii]);
+            # Z[ii,jj]= g2_result_2D[ii,jj]*cos(theta_var[ii]);
         end
     end
-    x_at = [pos[i][1] for i = 1:N]
-    y_at = [pos[i][2] for i = 1:N]
-    z_at = [pos[i][3] for i = 1:N]
+    x_at = [pos[i][1] for i = 1:N] ./ a
+    y_at = [pos[i][2] for i = 1:N] ./ a
+    z_at = [pos[i][3] for i = 1:N] ./ a
 
-    WGLMakie.activate!()
-    fig, ax, pltobj = surface(X, Y, Z; shading = true, ambient = Vec3f(0.65, 0.65, 0.65),
+    GLMakie.activate!()
+    fig, ax, pltobj = surface(X, Y, Z; shading = true,
+        # ambient = Vec3f(0.65, 0.65, 0.65),
         backlight = 1.0f0, color = sqrt.(X .^ 2 .+ Y .^ 2 .+ Z .^ 2),
         colormap = :viridis, transparency = true,
-        figure = (; resolution = (1200, 800), fontsize = 22),
-        axis=(type=Axis3, aspect = :data, azimuth = 2*pi/12, elevation = pi/30))
-    meshscatter!(ax, x_at, y_at, z_at; color = "black",
-                markersize = 0.05)
-    wireframe!(X, Y, Z; overdraw = true, transparency = true, color = (:black, 0.1))
+        figure = (; resolution = (1000, 900), fontsize = 22),
+        axis=(type=Axis3, aspect = :data, 
+              azimuth = 2*pi/8, 
+              elevation = pi/10,
+            #   perspectiveness = 1.0,
+              xlabel = "x / a",
+              ylabel = "y / a",
+              zlabel = "z / a",
+              xlabelsize=30,
+              ylabelsize=30,
+              zlabelsize=30,
+              viewmode=:fit,
+        )
+    )
+    meshscatter!(ax, x_at, y_at, z_at; color = "red",
+                markersize = 0.3)
+    wireframe!(X, Y, Z; overdraw = true, transparency = true, color = (:black, 0.05))
     wireframe!(X, Y*0 .+ minimum(Y), Z; transparency = true, color = (:grey, 0.1))
-    Colorbar(fig[1, 2], pltobj, height = Relative(0.5))
-    colsize!(fig.layout, 1, Aspect(1, 1.0))
+    Colorbar(fig[1, 2], pltobj, height = Relative(0.5), 
+             ticksvisible=false, ticklabelsvisible=false, label="Intensity")
+    colsize!(fig.layout, 1, Aspect(1.0, 1.0))
     fig
 
     # save((PATH_FIGS * "g2_N" * string(N) * "_" * "theta_phi_dark_" * DIRECTION * ".png"), fig) # here, you save your figure.
+    # save((PATH_FIGS * "intensity_N" * string(N) * "_" * "theta_phi_scatt_" * "L_sym_H.png"), fig; px_per_unit=3) # here, you save your figure.
+end
+
+
+"""Compute the radiation pattern"""
+
+function G(r, i, j, S::SpinCollection) # Green's Tensor overlap
+    G_i = GreenTensor(r-S.spins[i].position)
+    G_j = GreenTensor(r-S.spins[j].position)
+    return S.polarizations[i]' * (G_i'*G_j) * S.polarizations[j]
+end
+
+function intensity(r, ψ, S::SpinCollection) # The intensity ⟨E⁻(r)⋅E⁺(r)⟩
+    real(sum(expect(spsm[i,j], ψ)*G(r,i,j,S) for i=1:N, j=1:N))
+end
+
+
+function intensity_xy(ψ)
+    # X-Y view
+    x = range(-1a+pos[1][1], pos[end][1]+1a, 50)
+    y = range(-1a+pos[1][1], pos[end][1]+1a, 50)
+    z = 0.0a
+    I = zeros(length(x), length(y))
+    lk = ReentrantLock()
+    progress = Progress(length(x))
+    Threads.@threads for i in eachindex(x)
+        for j in eachindex(y)
+            I[i,j] = intensity([x[i], y[j], z], ψ, S)
+        end
+        next!(progress)
+    end
+    finish!(progress)
+    return x, y, I
+end
+
+function intensity_xz(ψ)
+    # X-Z view
+    x = range(-3a+pos[1][1], pos[end][1]+3a, 50)
+    y = 2.5a#0.5*(pos[Nx*Ny+7*Nx+1][2] + pos[end][2])
+    z = range(-3a+pos[1][3], pos[end][3]+3a, 50)
+    I = zeros(length(x), length(z))
+    lk = ReentrantLock()
+    progress = Progress(length(x))
+    Threads.@threads for i in eachindex(x)
+        for j in eachindex(z)
+            I[i,j] = intensity([x[i],y,z[j]], ψ, S)
+        end
+        next!(progress)
+    end
+    finish!(progress)
+
+    return x, z, I
+end
+
+let
+    x_xy, y_xy, I_xy_R = intensity_xy(ρ_ss_1)
+    _, _, I_xy_L = intensity_xy(ρ_ss_2)
+    x_xz, z_xz, I_xz_R = intensity_xz(ρ_ss_1)
+    _, _, I_xz_L = intensity_xz(ρ_ss_2)
+
+    Is = [I_xy_R, I_xy_L, I_xz_R, I_xz_L]
+
+    fig, ax = PyPlot.subplots(2, 2, figsize=(10,8))
+    # Lin scale
+    # levels = 0:I_arr_max*1e-2:I_arr_max*1e-0
+    idx = 1
+    for I in Is
+        idx_x = (idx - 1) ÷ 2 + 1
+        idx_y = (idx - 1) % 2 + 1
+
+        I_vec = vcat(I...)
+        x, y = (idx_x == 1) ? [x_xy, y_xy] : [x_xz, z_xz]
+
+        levels = (idx_x==2) ? range(minimum(I_vec), 1e0*maximum(I_vec), 30) : range(minimum(I_vec), maximum(I_vec), 30)
+        im = ax[idx_x, idx_y].contourf(x./a, y./a, I', 30, 
+                                       levels=levels, 
+                                    #    norm=matplotlib.colors.LogNorm(),
+                                 )
+        for p in pos
+            if idx_x == 1
+                ax[idx_x, idx_y].plot(p[1]./a, p[2]./a, "o", color="w", ms=2)
+            elseif idx_x == 2
+                ax[idx_x, idx_y].plot(p[1]./a, p[3]./a, "o", color="w", ms=2)
+            end
+        end
+        if idx_x == 1
+            ax[idx_x, idx_y].set_xlabel("x/a")
+            ax[idx_x, idx_y].set_ylabel("y/a")
+        elseif idx_x == 2
+            ax[idx_x, idx_y].set_xlabel("x/a")
+            ax[idx_x, idx_y].set_ylabel("z/a")
+        end
+        fig.colorbar(im, ax=ax[idx_x, idx_y], label="Intensity", ticks=[])
+        fig.tight_layout()
+        idx += 1
+    end
+    fig
 end
